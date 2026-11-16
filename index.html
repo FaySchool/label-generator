@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Label Generator – Avery labels from a CSV</title>
+<meta name="description" content="Design Avery label sheets from a CSV file in your browser. Nothing is uploaded.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231f6f5c'/%3E%3Crect x='6' y='7' width='20' height='7' rx='1.5' fill='%23fff'/%3E%3Crect x='6' y='18' width='20' height='7' rx='1.5' fill='%23fff' opacity='.7'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+<style id="pageStyle"></style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">Label Generator</div>
+    <label class="tpl">
+      <span>Label</span>
+      <select id="tplSelect"></select>
+    </label>
+    <button id="btnCustom" title="Edit sheet dimensions">Customize…</button>
+    <span id="tplInfo" class="muted"></span>
+    <div class="spacer"></div>
+    <button id="btnUndo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="btnRedo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+    <span class="sep"></span>
+    <button id="btnNew" title="Start a new blank design">New</button>
+    <button id="btnOpen" title="Open a saved design file">Open</button>
+    <button id="btnSave" title="Save this design to a file">Save</button>
+    <span class="sep"></span>
+    <div class="seg" id="viewTabs">
+      <button data-view="design" class="active">Design</button>
+      <button data-view="sheets">Preview sheets</button>
+    </div>
+    <button id="btnPrint" class="primary">Print…</button>
+  </header>
+
+  <main>
+    <aside id="left" class="panel">
+      <section>
+        <h2>Data</h2>
+        <div class="row">
+          <button id="btnCsv" class="primary">Load CSV…</button>
+          <button id="btnSample">Try sample data</button>
+        </div>
+        <p id="dataInfo" class="muted small">Load a CSV file, or drop one anywhere on this page. Your data stays in your browser.</p>
+        <label class="check" id="headerRow" hidden>
+          <input type="checkbox" id="chkHeader" checked> First row contains column names
+        </label>
+      </section>
+      <section id="columnsSection" hidden>
+        <h2>Columns</h2>
+        <p class="muted small">Click a column to add it as a merge field, or drag it onto the label.</p>
+        <ul id="columns"></ul>
+      </section>
+      <section>
+        <h2>Add</h2>
+        <div class="row">
+          <button id="btnAddText">Text box</button>
+          <button id="btnAddImage">Image</button>
+        </div>
+      </section>
+    </aside>
+
+    <section id="center">
+      <div id="designView" class="view">
+        <div class="toolbar">
+          <div class="recnav" id="recNav">
+            <button id="btnPrev" title="Previous record">‹</button>
+            <span id="recLabel">No data</span>
+            <button id="btnNext" title="Next record">›</button>
+          </div>
+          <label class="check"><input type="checkbox" id="chkNames"> Show field names</label>
+          <label class="check"><input type="checkbox" id="chkSnap" checked> Snap</label>
+          <div class="spacer"></div>
+          <button id="btnZoomOut" title="Zoom out">−</button>
+          <span id="zoomLabel" class="muted">100%</span>
+          <button id="btnZoomIn" title="Zoom in">+</button>
+          <button id="btnZoomFit">Fit</button>
+        </div>
+        <div id="stage">
+          <div id="labelWrap">
+            <div id="label"></div>
+            <div id="overlay"></div>
+          </div>
+          <div id="emptyHint">
+            <strong>Your label is empty.</strong>
+            Load a CSV and click its columns to place merge fields, or add a text box or image.
+          </div>
+        </div>
+      </div>
+
+      <div id="sheetsView" class="view" hidden>
+        <div class="toolbar">
+          <label class="check" title="Print label borders – handy for a test print on plain paper"><input type="checkbox" id="chkOutline"> Print outlines</label>
+          <label class="inline">Start at label <input type="number" id="numStart" min="1" value="1"></label>
+          <label class="inline">Copies of each <input type="number" id="numCopies" min="1" max="999" value="1"></label>
+          <label class="inline" title="Shift everything right (+) or left (−) to correct printer misalignment">Nudge → <input type="number" id="numOffX" step="0.01" value="0"></label>
+          <label class="inline" title="Shift everything down (+) or up (−) to correct printer misalignment">↓ <input type="number" id="numOffY" step="0.01" value="0"> <span id="offUnit" class="muted">in</span></label>
+          <div class="spacer"></div>
+          <span id="sheetInfo" class="muted"></span>
+        </div>
+        <div id="sheets"></div>
+      </div>
+    </section>
+
+    <aside id="right" class="panel">
+      <div id="propsEmpty">
+        <h2>Properties</h2>
+        <p class="muted small">Select a box on the label to change its font, alignment, size and position.</p>
+        <ul class="tips muted small">
+          <li>Drag a box to move it; drag its handles to resize.</li>
+          <li>Double-click a text box to edit it in place.</li>
+          <li>Arrow keys nudge the selected box (hold Shift for bigger steps).</li>
+          <li>Type <code>{{Column}}</code> to mix merge fields with plain text, e.g. <code>{{City}}, {{State}} {{Zip}}</code>.</li>
+          <li>When printing, choose <em>Actual size</em> / 100% scale and no margins.</li>
+        </ul>
+      </div>
+
+      <div id="propsEl" hidden>
+        <div id="secText">
+          <h2>Text</h2>
+          <textarea id="pContent" rows="4" spellcheck="false"></textarea>
+          <select id="pInsert"><option value="">Insert merge field…</option></select>
+
+          <h2>Font</h2>
+          <div class="row">
+            <select id="pFont" class="grow"></select>
+            <button id="btnFontUpload" title="Use a font file from your computer (.ttf, .otf, .woff, .woff2)">Upload…</button>
+          </div>
+          <div class="row">
+            <label class="inline">Size <input type="number" id="pSize" min="2" max="400" step="0.5"> pt</label>
+            <div class="seg">
+              <button data-toggle="bold" title="Bold"><b>B</b></button>
+              <button data-toggle="italic" title="Italic"><i>I</i></button>
+              <button data-toggle="underline" title="Underline"><u>U</u></button>
+            </div>
+            <input type="color" id="pColor" title="Text colour">
+          </div>
+          <div class="row">
+            <div class="seg grow">
+              <button data-set="align:left">Left</button>
+              <button data-set="align:center">Center</button>
+              <button data-set="align:right">Right</button>
+            </div>
+          </div>
+          <div class="row">
+            <div class="seg grow">
+              <button data-set="valign:top">Top</button>
+              <button data-set="valign:middle">Middle</button>
+              <button data-set="valign:bottom">Bottom</button>
+            </div>
+          </div>
+          <label class="inline">Line spacing <input type="number" id="pLine" min="0.8" max="3" step="0.05"></label>
+          <label class="check"><input type="checkbox" id="pShrink"> Shrink text to fit the box</label>
+          <label class="check"><input type="checkbox" id="pRemoveBlank"> Skip lines whose fields are empty</label>
+        </div>
+
+        <div id="secImage">
+          <h2>Image</h2>
+          <select id="pImgSource">
+            <option value="static">Same image on every label</option>
+            <option value="column">Different image per row (from a column)</option>
+          </select>
+          <div id="imgStatic" class="row">
+            <button id="btnImgChoose">Choose image…</button>
+          </div>
+          <div id="imgColumn">
+            <select id="pImgColumn"></select>
+            <p class="muted small">The column may hold image URLs, or file names of images you load here:</p>
+            <div class="row">
+              <button id="btnImgLib">Load image files…</button>
+              <span id="imgLibInfo" class="muted small"></span>
+            </div>
+          </div>
+          <label class="inline">Fit
+            <select id="pFit">
+              <option value="contain">Fit inside box</option>
+              <option value="cover">Fill box (crop)</option>
+              <option value="fill">Stretch</option>
+            </select>
+          </label>
+        </div>
+
+        <h2>Position <span id="posUnit" class="muted">(in)</span></h2>
+        <div class="grid4">
+          <label>X <input type="number" id="pX" step="0.01"></label>
+          <label>Y <input type="number" id="pY" step="0.01"></label>
+          <label>W <input type="number" id="pW" step="0.01"></label>
+          <label>H <input type="number" id="pH" step="0.01"></label>
+        </div>
+        <div class="row">
+          <div class="seg grow">
+            <button data-place="left">Left</button>
+            <button data-place="hcenter">Center</button>
+            <button data-place="right">Right</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="seg grow">
+            <button data-place="top">Top</button>
+            <button data-place="vmiddle">Middle</button>
+            <button data-place="bottom">Bottom</button>
+          </div>
+        </div>
+        <div class="row">
+          <button id="btnFront" class="grow">Bring to front</button>
+          <button id="btnBack" class="grow">Send to back</button>
+        </div>
+        <div class="row">
+          <button id="btnDup" class="grow" title="Ctrl+D">Duplicate</button>
+          <button id="btnDel" class="grow danger" title="Delete">Delete</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<dialog id="customDlg">
+  <form method="dialog">
+    <h2>Custom label sheet</h2>
+    <div class="grid2">
+      <label>Paper
+        <select name="paper"><option value="letter">US Letter</option><option value="a4">A4</option></select>
+      </label>
+      <label>Units
+        <select name="unit"><option value="in">inches</option><option value="mm">millimetres</option></select>
+      </label>
+      <label>Columns <input type="number" name="cols" min="1" max="20" step="1" required></label>
+      <label>Rows <input type="number" name="rows" min="1" max="40" step="1" required></label>
+      <label>Label width <input type="number" name="w" min="0" step="any" required></label>
+      <label>Label height <input type="number" name="h" min="0" step="any" required></label>
+      <label>Left margin <input type="number" name="left" min="0" step="any" required></label>
+      <label>Top margin <input type="number" name="top" min="0" step="any" required></label>
+      <label>Gap between columns <input type="number" name="gapX" min="0" step="any" required></label>
+      <label>Gap between rows <input type="number" name="gapY" min="0" step="any" required></label>
+      <label>Shape
+        <select name="shape"><option value="rect">Rectangle</option><option value="round">Round / oval</option></select>
+      </label>
+    </div>
+    <div class="row end">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="ok" class="primary">Use these dimensions</button>
+    </div>
+  </form>
+</dialog>
+
+<input type="file" id="fileCsv" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
+<input type="file" id="fileImg" accept="image/*" hidden>
+<input type="file" id="fileImgLib" accept="image/*" multiple hidden>
+<input type="file" id="fileFont" accept=".ttf,.otf,.woff,.woff2" hidden>
+<input type="file" id="fileDesign" accept=".json,application/json" hidden>
+
+<div id="printRoot"></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
