@@ -125,6 +125,7 @@ export function placeNode(node, el) {
   node.style.top = U(el.y);
   node.style.width = U(el.w);
   node.style.height = U(el.h);
+  node.style.transform = el.rot ? `rotate(${el.rot}deg)` : '';
 }
 
 const VALIGN = { top: 'flex-start', middle: 'center', bottom: 'flex-end' };

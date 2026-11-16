@@ -110,6 +110,7 @@
         <p class="muted small">Select a box on the label to change its font, alignment, size and position.</p>
         <ul class="tips muted small">
           <li>Drag a box to move it; drag its handles to resize.</li>
+          <li>Drag the round handle above a box to rotate it (Shift for 15° steps).</li>
           <li>Double-click a text box to edit it in place.</li>
           <li>Select several boxes with Ctrl/Cmd/Shift+click, or drag a rectangle across the label. Ctrl/Cmd+G groups them so they move together.</li>
           <li>To style a few words, select them while editing a text box and press Ctrl/Cmd+B, I or U.</li>
@@ -226,6 +227,14 @@
           <label>W <input type="number" id="pW" step="0.01"></label>
           <label>H <input type="number" id="pH" step="0.01"></label>
         </div>
+        </div>
+        <h2>Rotate</h2>
+        <div class="row">
+          <label class="inline" id="rotInput">Angle <input type="number" id="pRot" min="-360" max="360" step="1"> °</label>
+          <div class="seg grow">
+            <button data-rotate="-90" title="Rotate 90° anticlockwise">⟲ 90°</button>
+            <button data-rotate="90" title="Rotate 90° clockwise">⟳ 90°</button>
+          </div>
         </div>
         <h2>Align</h2>
         <div class="row">

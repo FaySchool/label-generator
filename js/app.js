@@ -58,10 +58,27 @@ const selection = () => state.design.elements.filter(e => state.sel.includes(e.i
 // The selected element when exactly one is selected (single-element editing).
 const selected = () => { const s = selection(); return s.length === 1 ? s[0] : null; };
 const groupOf = el => (el.group ? state.design.elements.filter(e => e.group === el.group) : [el]);
-function bounds(els) {
-  const x = Math.min(...els.map(e => e.x)), y = Math.min(...els.map(e => e.y));
-  return { x, y, w: Math.max(...els.map(e => e.x + e.w)) - x, h: Math.max(...els.map(e => e.y + e.h)) - y };
+// Axis-aligned box that encloses an element after its rotation (about its centre).
+function aabb(el) {
+  if (!el.rot) return el;
+  const a = (el.rot * Math.PI) / 180;
+  const c = Math.abs(Math.cos(a)), sn = Math.abs(Math.sin(a));
+  const w = el.w * c + el.h * sn, h = el.w * sn + el.h * c;
+  return { x: el.x + (el.w - w) / 2, y: el.y + (el.h - h) / 2, w, h };
 }
+function bounds(els) {
+  const bs = els.map(aabb);
+  const x = Math.min(...bs.map(e => e.x)), y = Math.min(...bs.map(e => e.y));
+  return { x, y, w: Math.max(...bs.map(e => e.x + e.w)) - x, h: Math.max(...bs.map(e => e.y + e.h)) - y };
+}
+// Moves an element back onto the label (as far as its size allows).
+function keepOnLabel(el) {
+  const t = getTpl();
+  const bb = aabb(el);
+  el.x += clamp(bb.x, 0, Math.max(0, t.w - bb.w)) - bb.x;
+  el.y += clamp(bb.y, 0, Math.max(0, t.h - bb.h)) - bb.y;
+}
+const normAngle = d => { const a = ((d % 360) + 540) % 360 - 180; return a === -180 ? 180 : Math.round(a * 10) / 10; };
 // Selected elements split into units that move together: whole groups, or single boxes.
 function selectionUnits() {
   const units = new Map();
@@ -302,6 +319,11 @@ function renderSelection() {
         h.style.cursor = CURSORS[name] + '-resize';
         box.append(h);
       }
+      const r = document.createElement('div');
+      r.className = 'h rot';
+      r.dataset.h = 'rot';
+      r.title = 'Drag to rotate (hold Shift for 15° steps)';
+      box.append(r);
     }
     overlay.append(box);
   }
@@ -351,8 +373,8 @@ function snapTargets(moving) {
   const t = getTpl();
   const others = state.design.elements.filter(o => !moving.includes(o));
   return {
-    tx: [0, t.w / 2, t.w, ...others.flatMap(o => [o.x, o.x + o.w / 2, o.x + o.w])],
-    ty: [0, t.h / 2, t.h, ...others.flatMap(o => [o.y, o.y + o.h / 2, o.y + o.h])],
+    tx: [0, t.w / 2, t.w, ...others.map(aabb).flatMap(o => [o.x, o.x + o.w / 2, o.x + o.w])],
+    ty: [0, t.h / 2, t.h, ...others.map(aabb).flatMap(o => [o.y, o.y + o.h / 2, o.y + o.h])],
   };
 }
 
@@ -402,36 +424,57 @@ function startResize(e, el, mode) {
   document.activeElement?.blur?.();
   const t = getTpl();
   const u = currentU();
-  const start = { x: el.x, y: el.y, w: el.w, h: el.h };
+  const rot = el.rot || 0;
+  // Quarter turns keep the box's edges parallel to the label, so they resize like an upright
+  // box (with snapping and label limits) on their on-screen outline. Other angles resize freely.
+  const quarter = rot % 90 === 0 ? ((rot / 90) % 4 + 4) % 4 : null;
+  const upright = quarter !== null;
+  const a = (rot * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+  // For quarter turns, work on the outline as seen on the label: map each handle to the edge it sits on.
+  const start = upright ? { ...aabb(el) } : { x: el.x, y: el.y, w: el.w, h: el.h };
+  const edges = upright ? [...mode].map(c => 'nesw'[('nesw'.indexOf(c) + quarter) % 4]).join('') : mode;
   const { tx, ty } = snapTargets([el]);
   const node = labelEl.querySelector(`[data-id="${el.id}"]`);
   const selBox = $('.sel', overlay);
   let moved = false;
 
   trackPointer(ev => {
-    const dx = (ev.clientX - e.clientX) / u;
-    const dy = (ev.clientY - e.clientY) / u;
+    const px = (ev.clientX - e.clientX) / u, py = (ev.clientY - e.clientY) / u;
     if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return;
     moved = true;
-    const snapOn = state.snap && !ev.altKey;
+    // Pointer movement along the axes being resized (the box's own axes when at an odd angle).
+    const dx = upright ? px : px * cos + py * sin;
+    const dy = upright ? py : -px * sin + py * cos;
+    const snapOn = state.snap && !ev.altKey && upright;
     const thr = 5 / u;
     let gx = null, gy = null;
     let l = start.x, r = start.x + start.w, tp = start.y, b = start.y + start.h;
-    if (mode.includes('w')) l += dx;
-    if (mode.includes('e')) r += dx;
-    if (mode.includes('n')) tp += dy;
-    if (mode.includes('s')) b += dy;
+    if (edges.includes('w')) l += dx;
+    if (edges.includes('e')) r += dx;
+    if (edges.includes('n')) tp += dy;
+    if (edges.includes('s')) b += dy;
     if (snapOn) {
-      if (mode.includes('w')) { const s = snapDelta([l], tx, thr); if (s) { l = s.at; gx = s.at; } }
-      if (mode.includes('e')) { const s = snapDelta([r], tx, thr); if (s) { r = s.at; gx = s.at; } }
-      if (mode.includes('n')) { const s = snapDelta([tp], ty, thr); if (s) { tp = s.at; gy = s.at; } }
-      if (mode.includes('s')) { const s = snapDelta([b], ty, thr); if (s) { b = s.at; gy = s.at; } }
+      if (edges.includes('w')) { const s = snapDelta([l], tx, thr); if (s) { l = s.at; gx = s.at; } }
+      if (edges.includes('e')) { const s = snapDelta([r], tx, thr); if (s) { r = s.at; gx = s.at; } }
+      if (edges.includes('n')) { const s = snapDelta([tp], ty, thr); if (s) { tp = s.at; gy = s.at; } }
+      if (edges.includes('s')) { const s = snapDelta([b], ty, thr); if (s) { b = s.at; gy = s.at; } }
     }
-    l = mode.includes('w') ? clamp(l, 0, start.x + start.w - MIN_SIZE) : start.x;
-    tp = mode.includes('n') ? clamp(tp, 0, start.y + start.h - MIN_SIZE) : start.y;
-    r = clamp(r, start.x + MIN_SIZE, t.w);
-    b = clamp(b, start.y + MIN_SIZE, t.h);
-    Object.assign(el, { x: l, y: tp, w: r - l, h: b - tp });
+    const lim = upright ? { l: 0, t: 0, r: t.w, b: t.h } : { l: -Infinity, t: -Infinity, r: Infinity, b: Infinity };
+    l = edges.includes('w') ? clamp(l, Math.min(lim.l, start.x), start.x + start.w - MIN_SIZE) : start.x;
+    tp = edges.includes('n') ? clamp(tp, Math.min(lim.t, start.y), start.y + start.h - MIN_SIZE) : start.y;
+    r = edges.includes('e') ? clamp(r, start.x + MIN_SIZE, Math.max(lim.r, start.x + start.w)) : start.x + start.w;
+    b = edges.includes('s') ? clamp(b, start.y + MIN_SIZE, Math.max(lim.b, start.y + start.h)) : start.y + start.h;
+    let w = r - l, h = b - tp, cx, cy;
+    if (upright) {
+      cx = (l + r) / 2; cy = (tp + b) / 2;
+      if (quarter % 2) [w, h] = [h, w]; // on-screen width is the box's own height
+    } else {
+      // The box rotates about its centre, so shift the new centre to keep the opposite edge still.
+      const mx = (l + r) / 2 - (start.x + start.w / 2), my = (tp + b) / 2 - (start.y + start.h / 2);
+      cx = start.x + start.w / 2 + mx * cos - my * sin;
+      cy = start.y + start.h / 2 + mx * sin + my * cos;
+    }
+    Object.assign(el, { x: cx - w / 2, y: cy - h / 2, w, h });
     placeNode(node, el);
     placeNode(selBox, el);
     fitAll(labelEl);
@@ -439,8 +482,52 @@ function startResize(e, el, mode) {
     syncProps();
   }, () => {
     showGuides(null, null);
-    if (moved) changed();
+    if (moved) { if (!upright) keepOnLabel(el); changed(); }
   });
+}
+
+function startRotate(e, el) {
+  e.preventDefault();
+  document.activeElement?.blur?.();
+  const rect = labelEl.getBoundingClientRect();
+  const u = currentU();
+  const cx = rect.left + (el.x + el.w / 2) * u, cy = rect.top + (el.y + el.h / 2) * u;
+  const node = labelEl.querySelector(`[data-id="${el.id}"]`);
+  const selBox = $('.sel', overlay);
+  let moved = false;
+  trackPointer(ev => {
+    moved = true;
+    let deg = (Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180) / Math.PI + 90;
+    if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+    else { const near = Math.round(deg / 90) * 90; if (Math.abs(deg - near) < 4) deg = near; } // settle on right angles
+    el.rot = normAngle(deg);
+    placeNode(node, el);
+    placeNode(selBox, el);
+    syncProps();
+  }, () => {
+    if (moved) { keepOnLabel(el); changed(); }
+  });
+}
+
+// Turns the selection by `delta` degrees about its common centre.
+function rotateSelected(delta) {
+  const els = selection();
+  if (!els.length) return;
+  const bb = bounds(els);
+  const ox = bb.x + bb.w / 2, oy = bb.y + bb.h / 2;
+  const a = (delta * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+  for (const el of els) {
+    const dx = el.x + el.w / 2 - ox, dy = el.y + el.h / 2 - oy;
+    el.x = ox + dx * cos - dy * sin - el.w / 2;
+    el.y = oy + dx * sin + dy * cos - el.h / 2;
+    el.rot = normAngle((el.rot || 0) + delta);
+  }
+  // Bring the turned selection back onto the label as one unit.
+  const t = getTpl();
+  const nb = bounds(els);
+  const mx = clamp(nb.x, 0, Math.max(0, t.w - nb.w)) - nb.x, my = clamp(nb.y, 0, Math.max(0, t.h - nb.h)) - nb.y;
+  for (const el of els) { el.x += mx; el.y += my; }
+  changed();
 }
 
 // Rubber-band selection started on an empty part of the label.
@@ -460,7 +547,7 @@ function startMarquee(e, base) {
     if (!shown) { overlay.append(box); shown = true; }
     placeNode(box, m);
     const hits = state.design.elements
-      .filter(o => o.x < m.x + m.w && o.x + o.w > m.x && o.y < m.y + m.h && o.y + o.h > m.y)
+      .filter(o => { const b = aabb(o); return b.x < m.x + m.w && b.x + b.w > m.x && b.y < m.y + m.h && b.y + b.h > m.y; })
       .flatMap(groupOf);
     setSelection([...base, ...hits.map(o => o.id)]);
   }, () => box.remove());
@@ -492,7 +579,7 @@ labelEl.addEventListener('pointerdown', e => {
 overlay.addEventListener('pointerdown', e => {
   const h = e.target.closest('.h');
   const el = selected();
-  if (h && el && e.button === 0) startResize(e, el, h.dataset.h);
+  if (h && el && e.button === 0) (h.dataset.h === 'rot' ? startRotate(e, el) : startResize(e, el, h.dataset.h));
 });
 stage.addEventListener('pointerdown', e => {
   if (e.target === stage || e.target.id === 'labelWrap') setSelection([]);
@@ -819,13 +906,14 @@ const FIELDS = [
   ['pImgSource', el => el.source, (el, v) => { el.source = v; }],
   ['pImgColumn', el => el.column, (el, v) => { el.column = v; }],
   ['pFit', el => el.fit, (el, v) => { el.fit = v; }],
-  ['pX', el => toUnit(el.x), (el, v) => { el.x = clamp(fromUnit(v), 0, Math.max(0, getTpl().w - el.w)); }],
-  ['pY', el => toUnit(el.y), (el, v) => { el.y = clamp(fromUnit(v), 0, Math.max(0, getTpl().h - el.h)); }],
-  ['pW', el => toUnit(el.w), (el, v) => { el.w = clamp(fromUnit(v), MIN_SIZE, getTpl().w - el.x); }],
-  ['pH', el => toUnit(el.h), (el, v) => { el.h = clamp(fromUnit(v), MIN_SIZE, getTpl().h - el.y); }],
+  ['pX', el => toUnit(el.x), (el, v) => { el.x = fromUnit(v); keepOnLabel(el); }],
+  ['pY', el => toUnit(el.y), (el, v) => { el.y = fromUnit(v); keepOnLabel(el); }],
+  ['pW', el => toUnit(el.w), (el, v) => { el.w = clamp(fromUnit(v), MIN_SIZE, el.rot ? Math.max(getTpl().w, getTpl().h) : getTpl().w - el.x); }],
+  ['pH', el => toUnit(el.h), (el, v) => { el.h = clamp(fromUnit(v), MIN_SIZE, el.rot ? Math.max(getTpl().w, getTpl().h) : getTpl().h - el.y); }],
+  ['pRot', el => el.rot || 0, (el, v) => { el.rot = normAngle(num(v, -360, 360, el.rot || 0)); keepOnLabel(el); }],
 ];
 
-const SINGLE_ONLY = ['pContent', 'pBarValue', 'pX', 'pY', 'pW', 'pH', 'pImgSource', 'pImgColumn'];
+const SINGLE_ONLY = ['pContent', 'pBarValue', 'pX', 'pY', 'pW', 'pH', 'pRot', 'pImgSource', 'pImgColumn'];
 for (const [id, get, set] of FIELDS) {
   const input = $('#' + id);
   const handler = () => {
@@ -867,6 +955,7 @@ function syncProps(force = false) {
   $('#secBarValue').hidden = !single;
   $('#barTextRow').hidden = els.every(e => e.format === 'QR');
   $('#secPos').hidden = !single;
+  $('#rotInput').hidden = !single;
   $('#posUnit').textContent = `(${getTpl().unit})`;
   for (const id of ['pX', 'pY', 'pW', 'pH']) $('#' + id).step = getTpl().unit === 'mm' ? 0.5 : 0.01;
   for (const [id, get] of FIELDS) {
@@ -917,6 +1006,9 @@ $('#propsEl').addEventListener('click', e => {
       if (p === 'bottom') dy = ref.y + ref.h - bb.h - bb.y;
       for (const el of unit) { el.x += dx; el.y += dy; }
     }
+  } else if (b.dataset.rotate) {
+    rotateSelected(+b.dataset.rotate);
+    return;
   } else if (b.dataset.distribute) {
     distributeSelected(b.dataset.distribute);
     return;
@@ -1062,8 +1154,8 @@ function addCopies(els, shift) {
   const groups = new Map();
   const copies = fitted.map(el => {
     const copy = { ...structuredClone(el), id: uid() };
-    copy.x = clamp(el.x + dx, 0, t.w - copy.w);
-    copy.y = clamp(el.y + dy, 0, t.h - copy.h);
+    copy.x = el.x + dx;
+    copy.y = el.y + dy;
     if (el.group) {
       if (!groups.has(el.group)) groups.set(el.group, uid());
       copy.group = groups.get(el.group);
@@ -1172,8 +1264,7 @@ function fitElementsToLabel() {
   for (const el of state.design.elements) {
     el.w = Math.min(el.w, t.w);
     el.h = Math.min(el.h, t.h);
-    el.x = clamp(el.x, 0, t.w - el.w);
-    el.y = clamp(el.y, 0, t.h - el.h);
+    keepOnLabel(el);
   }
   const p = state.design.print;
   p.startAt = clamp(p.startAt, 1, t.cols * t.rows);

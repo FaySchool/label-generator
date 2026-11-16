@@ -163,6 +163,8 @@ code { background: #f0f2f0; padding: 0 3px; border-radius: 3px; font-size: 11.5p
   position: absolute; width: 9px; height: 9px; background: #fff; border: 1.5px solid var(--sel);
   border-radius: 2px; pointer-events: auto; margin: -5px 0 0 -5px; touch-action: none;
 }
+.sel .h.rot { left: 50%; top: -22px; border-radius: 50%; cursor: grab; }
+.sel .h.rot::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1.5px; height: 12px; margin-left: -0.75px; background: var(--sel); }
 .sel.bbox { border: 1px dashed var(--sel); }
 .marquee { position: absolute; border: 1px solid var(--sel); background: rgba(11, 132, 255, .1); }
 .guide { position: absolute; background: #ff3b8d; }
