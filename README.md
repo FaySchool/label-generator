@@ -11,6 +11,9 @@ browser – your data is never uploaded – and there is no build step.
   drop it on the label as a merge field, or drag it to where you want it.
 - **WYSIWYG editor**: every merge field, text block and image is a box you can drag, resize, snap
   and nudge. Double-click a text box to edit it in place; mix fields and text with `{{Column}}`.
+- **Multi-select and groups**: Ctrl/Cmd/Shift+click or drag a rectangle to select several boxes,
+  then move, align, restyle, duplicate or delete them together. Ctrl/Cmd+G groups boxes so they
+  always move as one; Ctrl/Cmd+Shift+G ungroups.
 - **Conditional text**: `{{#Column}}…{{/Column}}` appears only when the column has a value, and
   `{{^Column}}…{{/Column}}` only when it is empty. For example
   `{{Last}}, {{First}}{{#Preferred}} ({{Preferred}}){{/Preferred}}` prints "Lovelace, Ada (Addie)"
