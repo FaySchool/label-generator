@@ -149,6 +149,7 @@ code { background: #f0f2f0; padding: 0 3px; border-radius: 3px; font-size: 11.5p
   background: #dcecff; color: #0b4f9e; border-radius: .25em; padding: 0 .25em;
   box-shadow: inset 0 0 0 1px rgba(11, 79, 158, .25);
 }
+.chip.cond { background: #fdebc8; color: #7a4a00; box-shadow: inset 0 0 0 1px rgba(122, 74, 0, .25); font-size: .8em; }
 .img-placeholder {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center;
   background: repeating-linear-gradient(45deg, #f1f3f1, #f1f3f1 6px, #e6e9e6 6px, #e6e9e6 12px);

@@ -577,6 +577,18 @@ function syncColumns() {
   };
   fill($('#pInsert'), 'Insert merge field…');
   fill($('#pImgColumn'), 'Choose a column…');
+
+  const condGroup = (label, prefix) => {
+    const g = document.createElement('optgroup');
+    g.label = label;
+    g.append(...d.headers.map(h => new Option(h, prefix + h)));
+    return g;
+  };
+  $('#pCond').replaceChildren(
+    new Option('Insert conditional text…', ''),
+    condGroup('Show text only if this column has a value', '#'),
+    condGroup('Show text only if this column is empty', '^'),
+  );
 }
 
 $('#columns').addEventListener('click', e => {
@@ -741,19 +753,36 @@ $('#propsEl').addEventListener('click', e => {
   changed();
 });
 
-$('#pInsert').onchange = e => {
+// Replaces the textarea selection with before + selection + after and leaves the caret inside.
+function insertIntoContent(before, after = '') {
   const el = selected();
-  const col = e.target.value;
-  e.target.value = '';
-  if (!el || !col) return;
+  if (!el) return;
   const ta = $('#pContent');
-  const token = `{{${col}}}`;
   const s = ta.selectionStart ?? ta.value.length, en = ta.selectionEnd ?? ta.value.length;
-  el.content = ta.value.slice(0, s) + token + ta.value.slice(en);
+  const middle = ta.value.slice(s, en);
+  el.content = ta.value.slice(0, s) + before + middle + after + ta.value.slice(en);
   ta.value = el.content;
   ta.focus();
-  ta.setSelectionRange(s + token.length, s + token.length);
+  const caret = s + before.length + middle.length;
+  ta.setSelectionRange(caret, caret);
   changed();
+}
+
+$('#pInsert').onchange = e => {
+  const col = e.target.value;
+  e.target.value = '';
+  if (col) insertIntoContent(`{{${col}}}`);
+};
+// Wraps the selected text in a condition; with nothing selected, inserts a ready-made one.
+$('#pCond').onchange = e => {
+  const v = e.target.value;
+  e.target.value = '';
+  if (!v) return;
+  const kind = v[0], col = v.slice(1);
+  const ta = $('#pContent');
+  const hasSelection = ta.selectionStart !== ta.selectionEnd;
+  const open = `{{${kind}${col}}}` + (!hasSelection && kind === '#' ? `{{${col}}}` : '');
+  insertIntoContent(open, `{{/${col}}}`);
 };
 
 $('#btnFontUpload').onclick = async () => {
