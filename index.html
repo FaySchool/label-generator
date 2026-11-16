@@ -57,6 +57,7 @@
         <div class="row">
           <button id="btnAddText">Text box</button>
           <button id="btnAddImage">Image</button>
+          <button id="btnAddBarcode">Barcode</button>
         </div>
       </section>
     </aside>
@@ -111,6 +112,7 @@
           <li>Drag a box to move it; drag its handles to resize.</li>
           <li>Double-click a text box to edit it in place.</li>
           <li>Select several boxes with Ctrl/Cmd/Shift+click, or drag a rectangle across the label. Ctrl/Cmd+G groups them so they move together.</li>
+          <li>To style a few words, select them while editing a text box and press Ctrl/Cmd+B, I or U.</li>
           <li>Ctrl/Cmd+C, X and V copy, cut and paste boxes; Ctrl/Cmd+B, I and U make the selected text bold, italic or underlined.</li>
           <li>Arrow keys nudge the selected box (hold Shift for bigger steps).</li>
           <li>Type <code>{{Column}}</code> to mix merge fields with plain text, e.g. <code>{{City}}, {{State}} {{Zip}}</code>.</li>
@@ -135,6 +137,7 @@
           <textarea id="pContent" rows="4" spellcheck="false"></textarea>
           <select id="pInsert"><option value="">Insert merge field…</option></select>
           <select id="pCond" title="Text that only appears when a column has a value (or is empty). Select text first to wrap it."><option value="">Insert conditional text…</option></select>
+          <p class="muted small">Select part of the text and press B, I or U to style just that part.</p>
           </div>
 
           <h2>Font</h2>
@@ -196,6 +199,23 @@
               <option value="fill">Stretch</option>
             </select>
           </label>
+        </div>
+
+        <div id="secBarcode">
+          <h2>Barcode</h2>
+          <select id="pBarFormat"></select>
+          <div id="secBarValue">
+            <label class="stack">Value
+              <input type="text" id="pBarValue" spellcheck="false">
+            </label>
+            <select id="pBarInsert"><option value="">Insert merge field…</option></select>
+            <p class="muted small">Usually a single merge field such as <code>{{ID}}</code>; text and conditions work too. Rows whose value is empty or not valid for the chosen type print no barcode.</p>
+          </div>
+          <div class="row" id="barTextRow">
+            <label class="check"><input type="checkbox" id="pBarText"> Show value below</label>
+            <label class="inline">Size <input type="number" id="pBarTextSize" min="3" max="72" step="0.5"> pt</label>
+          </div>
+          <label class="inline">Colour <input type="color" id="pBarColor"></label>
         </div>
 
         <div id="secPos">
@@ -275,6 +295,8 @@
 <input type="file" id="fileDesign" accept=".json,application/json" hidden>
 
 <div id="printRoot"></div>
+<script src="vendor/JsBarcode.all.min.js"></script>
+<script src="vendor/qrcode.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

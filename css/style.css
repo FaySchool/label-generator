@@ -139,6 +139,9 @@ code { background: #f0f2f0; padding: 0 3px; border-radius: 3px; font-size: 11.5p
 .el-text { display: flex; flex-direction: column; }
 .txt { width: 100%; white-space: pre-wrap; overflow-wrap: break-word; flex: none; }
 .txt.nowrapword { overflow-wrap: normal; }
+.el-barcode { display: flex; flex-direction: column; }
+.el-barcode svg { flex: 1; min-height: 0; width: 100%; display: block; }
+.bar-text { flex: none; text-align: center; font-family: Arial, Helvetica, sans-serif; line-height: 1.15; white-space: nowrap; overflow: hidden; }
 .el-image img { width: 100%; height: 100%; display: block; }
 
 /* editor-only decoration */
@@ -195,3 +198,9 @@ dialog h2 { margin: 0 0 14px; font-size: 16px; }
   .page:last-child { break-after: auto; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+.stack { display: block; margin: 6px 0; }
+.stack input { display: block; width: 100%; margin-top: 3px; }
+input[type=text] { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 6px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+#label .invalid .img-placeholder { color: var(--danger); }
+#columns .col-img + .col-img { margin-left: -2px; }
