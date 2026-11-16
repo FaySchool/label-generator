@@ -112,6 +112,7 @@
           <li>Double-click a text box to edit it in place.</li>
           <li>Arrow keys nudge the selected box (hold Shift for bigger steps).</li>
           <li>Type <code>{{Column}}</code> to mix merge fields with plain text, e.g. <code>{{City}}, {{State}} {{Zip}}</code>.</li>
+          <li>Conditional text: <code>{{#Nickname}} ({{Nickname}}){{/Nickname}}</code> appears only when Nickname has a value; use <code>{{^Nickname}}…{{/Nickname}}</code> for text shown only when it is empty.</li>
           <li>When printing, choose <em>Actual size</em> / 100% scale and no margins.</li>
         </ul>
       </div>
@@ -121,6 +122,7 @@
           <h2>Text</h2>
           <textarea id="pContent" rows="4" spellcheck="false"></textarea>
           <select id="pInsert"><option value="">Insert merge field…</option></select>
+          <select id="pCond" title="Text that only appears when a column has a value (or is empty). Select text first to wrap it."><option value="">Insert conditional text…</option></select>
 
           <h2>Font</h2>
           <div class="row">

@@ -11,6 +11,10 @@ browser – your data is never uploaded – and there is no build step.
   drop it on the label as a merge field, or drag it to where you want it.
 - **WYSIWYG editor**: every merge field, text block and image is a box you can drag, resize, snap
   and nudge. Double-click a text box to edit it in place; mix fields and text with `{{Column}}`.
+- **Conditional text**: `{{#Column}}…{{/Column}}` appears only when the column has a value, and
+  `{{^Column}}…{{/Column}}` only when it is empty. For example
+  `{{Last}}, {{First}}{{#Preferred}} ({{Preferred}}){{/Preferred}}` prints "Lovelace, Ada (Addie)"
+  or just "Lovelace, Ada". The *Insert conditional text* menu writes these for you.
 - **Fonts**: standard system fonts, a set of Google Fonts loaded on demand, or upload your own
   `.ttf` / `.otf` / `.woff` / `.woff2` file.
 - **Images**: one image on every label (e.g. a logo), or a different image per row from a column

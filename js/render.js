@@ -7,10 +7,26 @@ const TOKEN = /\{\{\s*([^{}]+?)\s*\}\}/g;
 
 export const U = v => `calc(var(--u) * ${Math.round(v * 1000) / 1000})`;
 
+// Conditional sections: {{#Field}}…{{/Field}} shows its content only when Field has a value,
+// {{^Field}}…{{/Field}} only when it is empty. Sections may nest and span lines.
+const SECTION = /\{\{\s*([#^])\s*([^{}]+?)\s*\}\}([\s\S]*?)\{\{\s*\/\s*\2\s*\}\}/;
+const MARK = '\u0000'; // marks where a section was, so emptied lines can be skipped
+
+function resolveSections(content, row) {
+  let s = String(content), m;
+  for (let guard = 0; guard < 200 && (m = SECTION.exec(s)); guard++) {
+    const filled = String(row?.[m[2]] ?? '').trim() !== '';
+    const show = m[1] === '#' ? filled : !filled;
+    s = s.slice(0, m.index) + MARK + (show ? m[3] : '') + s.slice(m.index + m[0].length);
+  }
+  return s;
+}
+
 export function mergeText(content, row, removeBlank) {
   const out = [];
-  for (const line of String(content).split('\n')) {
-    let hadField = false;
+  for (const raw of resolveSections(content, row).split('\n')) {
+    let hadField = raw.includes(MARK);
+    const line = raw.replaceAll(MARK, '');
     const s = line.replace(TOKEN, (m, key) => { hadField = true; return row?.[key] ?? ''; });
     if (removeBlank && hadField && !s.trim()) continue;
     out.push(s);
@@ -23,8 +39,14 @@ function appendChips(target, content) {
   for (const m of String(content).matchAll(TOKEN)) {
     if (m.index > last) target.append(content.slice(last, m.index));
     const chip = document.createElement('span');
+    const name = m[1];
+    const kind = name[0];
     chip.className = 'chip';
-    chip.textContent = m[1];
+    if (kind === '#' || kind === '^' || kind === '/') {
+      chip.classList.add('cond');
+      const field = name.slice(1).trim();
+      chip.textContent = kind === '#' ? `if ${field}:` : kind === '^' ? `if no ${field}:` : 'end if';
+    } else chip.textContent = name;
     target.append(chip);
     last = m.index + m[0].length;
   }
