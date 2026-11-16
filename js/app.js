@@ -1,6 +1,7 @@
 import { TEMPLATES, TEMPLATE_GROUPS, IN, MM } from './templates.js';
 import { parseCSV } from './csv.js';
-import { buildElementNode, placeNode, fitAll, U } from './render.js';
+import { buildElementNode, placeNode, fitAll, U, toggleRangeStyle } from './render.js';
+import { BARCODE_FORMATS } from './barcode.js';
 import {
   SYSTEM_FONTS, GOOGLE_FONTS, fontStack, setFontLoadCallback, registerCustomFont, whenFontsReady,
 } from './fonts.js';
@@ -589,6 +590,17 @@ function makeImage(props, at) {
   return { id: uid(), type: 'image', x, y, w: size, h: size, source: 'static', assetId: null, column: '', fit: 'contain', ...props };
 }
 
+function makeBarcode(content) {
+  const t = getTpl();
+  const m = labelMargin();
+  const w = Math.max(MIN_SIZE, Math.min(t.w - 2 * m, 150));
+  const h = Math.max(MIN_SIZE, Math.min(t.h - 2 * m, 44));
+  return {
+    id: uid(), type: 'barcode', x: clamp((t.w - w) / 2, 0, t.w - w), y: clamp(t.h - h - m, 0, t.h - h), w, h,
+    format: 'CODE128', content, showText: true, textSize: 7, color: '#000000',
+  };
+}
+
 async function chooseStaticImage(el) {
   const [file] = await pickFile($('#fileImg'));
   if (!file) return false;
@@ -605,6 +617,7 @@ $('#btnAddText').onclick = () => {
   addElement(el);
   startInlineEdit(el);
 };
+$('#btnAddBarcode').onclick = () => addElement(makeBarcode(state.data.headers[0] ? `{{${state.data.headers[0]}}}` : '12345678'));
 $('#btnAddImage').onclick = async () => {
   const [file] = await pickFile($('#fileImg'));
   if (!file) return;
@@ -672,9 +685,13 @@ function syncColumns() {
     main.append(name, sample);
     const img = document.createElement('button');
     img.className = 'col-img';
-    img.textContent = 'as image';
+    img.textContent = 'image';
     img.title = 'Add this column as an image box (the column holds image URLs or file names)';
-    li.append(main, img);
+    const bar = document.createElement('button');
+    bar.className = 'col-img col-bar';
+    bar.textContent = 'barcode';
+    bar.title = 'Add a barcode or QR code generated from this column';
+    li.append(main, img, bar);
     return li;
   }));
 
@@ -685,6 +702,7 @@ function syncColumns() {
   };
   fill($('#pInsert'), 'Insert merge field…');
   fill($('#pImgColumn'), 'Choose a column…');
+  fill($('#pBarInsert'), 'Insert merge field…');
 
   const condGroup = (label, prefix) => {
     const g = document.createElement('optgroup');
@@ -703,7 +721,8 @@ $('#columns').addEventListener('click', e => {
   const li = e.target.closest('li');
   if (!li) return;
   const col = li.dataset.col;
-  if (e.target.closest('.col-img')) addElement(makeImage({ source: 'column', column: col }));
+  if (e.target.closest('.col-bar')) addElement(makeBarcode(`{{${col}}}`));
+  else if (e.target.closest('.col-img')) addElement(makeImage({ source: 'column', column: col }));
   else addElement(makeText(`{{${col}}}`));
 });
 $('#columns').addEventListener('dragstart', e => {
@@ -785,10 +804,15 @@ function syncFontList() {
 // [input id, getter, setter]; setters receive the raw input value.
 const num = (v, lo, hi, fallback) => { const n = parseFloat(v); return Number.isFinite(n) ? clamp(n, lo, hi) : fallback; };
 const FIELDS = [
-  ['pContent', el => el.content, (el, v) => { el.content = v; }],
+  ['pContent', el => (el.type === 'text' ? el.content : undefined), (el, v) => { el.content = v; }],
+  ['pBarFormat', el => el.format, (el, v) => { el.format = v; }],
+  ['pBarValue', el => (el.type === 'barcode' ? el.content : undefined), (el, v) => { el.content = v; }],
+  ['pBarText', el => el.showText, (el, v) => { el.showText = v; }],
+  ['pBarTextSize', el => el.textSize, (el, v) => { el.textSize = num(v, 3, 72, el.textSize); }],
+  ['pBarColor', el => (el.type === 'barcode' ? el.color : undefined), (el, v) => { el.color = v; }],
   ['pFont', el => el.fontFamily, (el, v) => { el.fontFamily = v; }],
   ['pSize', el => el.fontSize, (el, v) => { el.fontSize = num(v, 2, 400, el.fontSize); }],
-  ['pColor', el => el.color, (el, v) => { el.color = v; }],
+  ['pColor', el => (el.type === 'text' ? el.color : undefined), (el, v) => { el.color = v; }],
   ['pLine', el => el.lineHeight, (el, v) => { el.lineHeight = num(v, 0.8, 3, el.lineHeight); }],
   ['pShrink', el => el.shrink, (el, v) => { el.shrink = v; }],
   ['pRemoveBlank', el => el.removeBlank, (el, v) => { el.removeBlank = v; }],
@@ -801,7 +825,7 @@ const FIELDS = [
   ['pH', el => toUnit(el.h), (el, v) => { el.h = clamp(fromUnit(v), MIN_SIZE, getTpl().h - el.y); }],
 ];
 
-const SINGLE_ONLY = ['pContent', 'pX', 'pY', 'pW', 'pH', 'pImgSource', 'pImgColumn'];
+const SINGLE_ONLY = ['pContent', 'pBarValue', 'pX', 'pY', 'pW', 'pH', 'pImgSource', 'pImgColumn'];
 for (const [id, get, set] of FIELDS) {
   const input = $('#' + id);
   const handler = () => {
@@ -839,6 +863,9 @@ function syncProps(force = false) {
   $('#secContent').hidden = !single;
   $('#secImage').hidden = !allImage;
   $('#secImageSource').hidden = !single;
+  $('#secBarcode').hidden = !els.every(e => e.type === 'barcode');
+  $('#secBarValue').hidden = !single;
+  $('#barTextRow').hidden = els.every(e => e.format === 'QR');
   $('#secPos').hidden = !single;
   $('#posUnit').textContent = `(${getTpl().unit})`;
   for (const id of ['pX', 'pY', 'pW', 'pH']) $('#' + id).step = getTpl().unit === 'mm' ? 0.5 : 0.01;
@@ -866,6 +893,7 @@ $('#propsEl').addEventListener('click', e => {
   const els = selection();
   const b = e.target.closest('button');
   if (!els.length || !b) return;
+  if (b.dataset.handled) { delete b.dataset.handled; return; }
   if (b.dataset.toggle) {
     const k = b.dataset.toggle, on = !els[0][k];
     for (const el of els) if (el.type === 'text') el[k] = on;
@@ -927,6 +955,47 @@ function insertIntoContent(before, after = '') {
   ta.setSelectionRange(caret, caret);
   changed();
 }
+
+$('#pBarInsert').onchange = e => {
+  const el = selected();
+  const col = e.target.value;
+  e.target.value = '';
+  if (!el || !col) return;
+  const input = $('#pBarValue');
+  const s = input.selectionStart ?? input.value.length, en = input.selectionEnd ?? input.value.length;
+  el.content = input.value.slice(0, s) + `{{${col}}}` + input.value.slice(en);
+  input.value = el.content;
+  changed();
+};
+$('#pBarFormat').append(...BARCODE_FORMATS.map(f => new Option(f.name, f.id)));
+
+/* Styling part of a text box: with text selected in the in-place editor or the Text field,
+   bold / italic / underline wrap just that selection in <b> / <i> / <u> tags. */
+const contentField = node => (node?.matches?.('.inline-edit, #pContent') ? node : null);
+function styleSelectedRange(ta, key) {
+  if (ta.selectionStart === ta.selectionEnd) return false;
+  const r = toggleRangeStyle(ta.value, ta.selectionStart, ta.selectionEnd, key[0]);
+  if (r.content !== ta.value) {
+    ta.focus();
+    ta.select();
+    // insertText keeps the field's own undo history; fall back to assigning the value.
+    if (!document.execCommand('insertText', false, r.content)) {
+      ta.value = r.content;
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+  ta.setSelectionRange(r.from, r.to);
+  return true;
+}
+// Toolbar buttons: act on the text selection when there is one, without stealing focus.
+$('#propsEl').addEventListener('mousedown', e => {
+  const b = e.target.closest('[data-toggle]');
+  const ta = contentField(document.activeElement);
+  if (!b || !ta || ta.selectionStart === ta.selectionEnd) return;
+  e.preventDefault();
+  styleSelectedRange(ta, b.dataset.toggle);
+  b.dataset.handled = '1';
+});
 
 $('#pInsert').onchange = e => {
   const col = e.target.value;
@@ -1329,7 +1398,8 @@ window.addEventListener('keydown', e => {
   const styleKey = { b: 'bold', i: 'italic', u: 'underline' }[key];
   if (mod && styleKey && !e.shiftKey && !e.altKey && state.view === 'design'
       && (!inField || e.target.matches('.inline-edit, #pContent'))) {
-    if (toggleTextStyle(styleKey)) e.preventDefault();
+    const ta = contentField(e.target);
+    if ((ta && styleSelectedRange(ta, styleKey)) || toggleTextStyle(styleKey)) e.preventDefault();
     return;
   }
   if (inField) return;

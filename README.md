@@ -19,6 +19,11 @@ browser – your data is never uploaded – and there is no build step.
   `{{^Column}}…{{/Column}}` only when it is empty. For example
   `{{Last}}, {{First}}{{#Preferred}} ({{Preferred}}){{/Preferred}}` prints "Lovelace, Ada (Addie)"
   or just "Lovelace, Ada". The *Insert conditional text* menu writes these for you.
+- **Rich text**: select part of a text box and press Ctrl/Cmd+B, I or U to make just those words
+  bold, italic or underlined (stored as `<b>`, `<i>`, `<u>` tags). A merge field is always styled
+  as a whole, and styling works inside conditional text.
+- **Barcodes**: generate Code 128, Code 39, EAN-13, EAN-8, UPC-A, ITF-14, Interleaved 2 of 5,
+  Codabar, MSI or QR codes from a merge field.
 - **Fonts**: standard system fonts, a set of Google Fonts loaded on demand, or upload your own
   `.ttf` / `.otf` / `.woff` / `.woff2` file.
 - **Images**: one image on every label (e.g. a logo), or a different image per row from a column
@@ -52,3 +57,9 @@ One-time setup: in the repository go to **Settings → Pages** and set **Source*
 **GitHub Actions**. The site will then be available at `https://<user>.github.io/<repo>/`.
 
 All paths are relative, so the site works from any sub-path.
+
+## Third-party code
+
+`vendor/JsBarcode.all.min.js` ([JsBarcode](https://github.com/lindell/JsBarcode), MIT) and
+`vendor/qrcode.js` ([qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator), MIT)
+provide the barcode encoders.
