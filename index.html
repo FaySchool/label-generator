@@ -110,6 +110,7 @@
         <ul class="tips muted small">
           <li>Drag a box to move it; drag its handles to resize.</li>
           <li>Double-click a text box to edit it in place.</li>
+          <li>Select several boxes with Ctrl/Cmd/Shift+click, or drag a rectangle across the label. Ctrl/Cmd+G groups them so they move together.</li>
           <li>Arrow keys nudge the selected box (hold Shift for bigger steps).</li>
           <li>Type <code>{{Column}}</code> to mix merge fields with plain text, e.g. <code>{{City}}, {{State}} {{Zip}}</code>.</li>
           <li>Conditional text: <code>{{#Nickname}} ({{Nickname}}){{/Nickname}}</code> appears only when Nickname has a value; use <code>{{^Nickname}}…{{/Nickname}}</code> for text shown only when it is empty.</li>
@@ -118,11 +119,22 @@
       </div>
 
       <div id="propsEl" hidden>
+        <div id="multiInfo">
+          <h2>Selection</h2>
+          <p id="multiCount"></p>
+        </div>
+        <div id="groupRow" class="row">
+          <button id="btnGroup" class="grow" title="Ctrl+G">Group</button>
+          <button id="btnUngroup" class="grow" title="Ctrl+Shift+G">Ungroup</button>
+        </div>
+        <p id="groupHint" class="muted small">This box is part of a group. Click another box in the group to select the whole group again.</p>
         <div id="secText">
+          <div id="secContent">
           <h2>Text</h2>
           <textarea id="pContent" rows="4" spellcheck="false"></textarea>
           <select id="pInsert"><option value="">Insert merge field…</option></select>
           <select id="pCond" title="Text that only appears when a column has a value (or is empty). Select text first to wrap it."><option value="">Insert conditional text…</option></select>
+          </div>
 
           <h2>Font</h2>
           <div class="row">
@@ -159,6 +171,7 @@
 
         <div id="secImage">
           <h2>Image</h2>
+          <div id="secImageSource">
           <select id="pImgSource">
             <option value="static">Same image on every label</option>
             <option value="column">Different image per row (from a column)</option>
@@ -174,6 +187,7 @@
               <span id="imgLibInfo" class="muted small"></span>
             </div>
           </div>
+          </div>
           <label class="inline">Fit
             <select id="pFit">
               <option value="contain">Fit inside box</option>
@@ -183,6 +197,7 @@
           </label>
         </div>
 
+        <div id="secPos">
         <h2>Position <span id="posUnit" class="muted">(in)</span></h2>
         <div class="grid4">
           <label>X <input type="number" id="pX" step="0.01"></label>
@@ -190,6 +205,8 @@
           <label>W <input type="number" id="pW" step="0.01"></label>
           <label>H <input type="number" id="pH" step="0.01"></label>
         </div>
+        </div>
+        <h2>Align</h2>
         <div class="row">
           <div class="seg grow">
             <button data-place="left">Left</button>

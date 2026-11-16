@@ -31,7 +31,7 @@ const state = {
   design: newDesign(),
   data: { raw: '', fileName: '', hasHeader: true, headers: [], records: [] },
   imageLib: new Map(), // lower-cased file name -> object URL
-  sel: null,
+  sel: [], // ids of the selected elements
   record: 0,
   zoom: 'fit',
   view: 'design',
@@ -53,7 +53,24 @@ function getTpl() {
 const unitK = () => (getTpl().unit === 'mm' ? MM : IN);
 const toUnit = pt => +(pt / unitK()).toFixed(getTpl().unit === 'mm' ? 1 : 3);
 const fromUnit = v => (parseFloat(v) || 0) * unitK();
-const selected = () => state.design.elements.find(e => e.id === state.sel) || null;
+const selection = () => state.design.elements.filter(e => state.sel.includes(e.id));
+// The selected element when exactly one is selected (single-element editing).
+const selected = () => { const s = selection(); return s.length === 1 ? s[0] : null; };
+const groupOf = el => (el.group ? state.design.elements.filter(e => e.group === el.group) : [el]);
+function bounds(els) {
+  const x = Math.min(...els.map(e => e.x)), y = Math.min(...els.map(e => e.y));
+  return { x, y, w: Math.max(...els.map(e => e.x + e.w)) - x, h: Math.max(...els.map(e => e.y + e.h)) - y };
+}
+// Selected elements split into units that move together: whole groups, or single boxes.
+function selectionUnits() {
+  const units = new Map();
+  for (const el of selection()) {
+    const key = el.group || el.id;
+    if (!units.has(key)) units.set(key, []);
+    units.get(key).push(el);
+  }
+  return [...units.values()];
+}
 const currentRow = () => state.data.records[state.record] || null;
 
 function currentU() {
@@ -162,7 +179,7 @@ async function openDesignText(text) {
   const d = parsed?.design;
   if (!d || !Array.isArray(d.elements)) { alert('That file is not a valid label design.'); return; }
   state.design = normalizeDesign(d);
-  state.sel = null;
+  state.sel = [];
   await registerDesignFonts();
   resetHistory();
   refreshAll();
@@ -201,7 +218,7 @@ function stepHistory(dir) {
   if (idx < 0 || idx >= hist.stack.length) return;
   hist.idx = idx;
   Object.assign(state.design, JSON.parse(hist.stack[idx]));
-  if (!selected()) state.sel = null;
+  state.sel = selection().map(e => e.id);
   refreshAll({ history: false });
 }
 function updateUndoButtons() {
@@ -266,26 +283,34 @@ const CURSORS = { nw: 'nwse', se: 'nwse', ne: 'nesw', sw: 'nesw', n: 'ns', s: 'n
 
 function renderSelection() {
   $$('.sel', overlay).forEach(n => n.remove());
-  const el = selected();
-  if (!el) return;
-  const box = document.createElement('div');
-  box.className = 'sel';
-  placeNode(box, el);
-  for (const [name, [x, y]] of Object.entries(HANDLES)) {
-    const h = document.createElement('div');
-    h.className = 'h';
-    h.dataset.h = name;
-    h.style.left = x + '%';
-    h.style.top = y + '%';
-    h.style.cursor = CURSORS[name] + '-resize';
-    box.append(h);
+  const els = selection();
+  for (const el of els) {
+    const box = document.createElement('div');
+    box.className = 'sel';
+    placeNode(box, el);
+    if (els.length === 1) {
+      for (const [name, [x, y]] of Object.entries(HANDLES)) {
+        const h = document.createElement('div');
+        h.className = 'h';
+        h.dataset.h = name;
+        h.style.left = x + '%';
+        h.style.top = y + '%';
+        h.style.cursor = CURSORS[name] + '-resize';
+        box.append(h);
+      }
+    }
+    overlay.append(box);
   }
-  overlay.append(box);
+  if (els.length > 1) {
+    const box = document.createElement('div');
+    box.className = 'sel bbox';
+    placeNode(box, bounds(els));
+    overlay.append(box);
+  }
 }
 
-function select(id) {
-  if (state.sel === id) return;
-  state.sel = id;
+function setSelection(ids) {
+  state.sel = [...new Set(ids)];
   renderSelection();
   syncProps();
 }
@@ -306,93 +331,167 @@ function snapDelta(points, targets, threshold) {
   return best;
 }
 
-function startDrag(e, el, mode) {
+function trackPointer(onMove, onUp) {
+  const end = ev => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', end);
+    window.removeEventListener('pointercancel', end);
+    onUp(ev);
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+}
+
+function snapTargets(moving) {
+  const t = getTpl();
+  const others = state.design.elements.filter(o => !moving.includes(o));
+  return {
+    tx: [0, t.w / 2, t.w, ...others.flatMap(o => [o.x, o.x + o.w / 2, o.x + o.w])],
+    ty: [0, t.h / 2, t.h, ...others.flatMap(o => [o.y, o.y + o.h / 2, o.y + o.h])],
+  };
+}
+
+// Drags the whole selection. `onClick` runs instead if the pointer never moved.
+function startMove(e, onClick) {
   e.preventDefault();
   document.activeElement?.blur?.();
   const t = getTpl();
   const u = currentU();
-  const start = { px: e.clientX, py: e.clientY, x: el.x, y: el.y, w: el.w, h: el.h };
-  const others = state.design.elements.filter(o => o !== el);
-  const tx = [0, t.w / 2, t.w, ...others.flatMap(o => [o.x, o.x + o.w / 2, o.x + o.w])];
-  const ty = [0, t.h / 2, t.h, ...others.flatMap(o => [o.y, o.y + o.h / 2, o.y + o.h])];
+  const els = selection();
+  const starts = els.map(o => ({ o, x: o.x, y: o.y, node: labelEl.querySelector(`[data-id="${o.id}"]`) }));
+  const bb = bounds(els);
+  const { tx, ty } = snapTargets(els);
+  let moved = false;
+
+  trackPointer(ev => {
+    if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return;
+    moved = true;
+    let x = bb.x + (ev.clientX - e.clientX) / u;
+    let y = bb.y + (ev.clientY - e.clientY) / u;
+    let gx = null, gy = null;
+    if (state.snap && !ev.altKey) {
+      const thr = 5 / u;
+      const sx = snapDelta([x, x + bb.w / 2, x + bb.w], tx, thr);
+      const sy = snapDelta([y, y + bb.h / 2, y + bb.h], ty, thr);
+      if (sx) { x += sx.d; gx = sx.at; }
+      if (sy) { y += sy.d; gy = sy.at; }
+    }
+    x = clamp(x, 0, Math.max(0, t.w - bb.w));
+    y = clamp(y, 0, Math.max(0, t.h - bb.h));
+    for (const s of starts) {
+      s.o.x = s.x + x - bb.x;
+      s.o.y = s.y + y - bb.y;
+      placeNode(s.node, s.o);
+    }
+    renderSelection();
+    showGuides(gx, gy);
+    syncProps();
+  }, () => {
+    showGuides(null, null);
+    if (moved) changed(); else onClick?.();
+  });
+}
+
+function startResize(e, el, mode) {
+  e.preventDefault();
+  document.activeElement?.blur?.();
+  const t = getTpl();
+  const u = currentU();
+  const start = { x: el.x, y: el.y, w: el.w, h: el.h };
+  const { tx, ty } = snapTargets([el]);
   const node = labelEl.querySelector(`[data-id="${el.id}"]`);
   const selBox = $('.sel', overlay);
   let moved = false;
 
-  const onMove = ev => {
-    const dx = (ev.clientX - start.px) / u;
-    const dy = (ev.clientY - start.py) / u;
-    if (!moved && Math.hypot(ev.clientX - start.px, ev.clientY - start.py) < 3) return;
+  trackPointer(ev => {
+    const dx = (ev.clientX - e.clientX) / u;
+    const dy = (ev.clientY - e.clientY) / u;
+    if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return;
     moved = true;
     const snapOn = state.snap && !ev.altKey;
     const thr = 5 / u;
-    let { x, y, w, h } = start;
     let gx = null, gy = null;
-
-    if (mode === 'move') {
-      x += dx; y += dy;
-      if (snapOn) {
-        const sx = snapDelta([x, x + w / 2, x + w], tx, thr);
-        const sy = snapDelta([y, y + h / 2, y + h], ty, thr);
-        if (sx) { x += sx.d; gx = sx.at; }
-        if (sy) { y += sy.d; gy = sy.at; }
-      }
-      x = clamp(x, 0, Math.max(0, t.w - w));
-      y = clamp(y, 0, Math.max(0, t.h - h));
-    } else {
-      let l = x, r = x + w, tp = y, b = y + h;
-      if (mode.includes('w')) l += dx;
-      if (mode.includes('e')) r += dx;
-      if (mode.includes('n')) tp += dy;
-      if (mode.includes('s')) b += dy;
-      if (snapOn) {
-        if (mode.includes('w')) { const s = snapDelta([l], tx, thr); if (s) { l = s.at; gx = s.at; } }
-        if (mode.includes('e')) { const s = snapDelta([r], tx, thr); if (s) { r = s.at; gx = s.at; } }
-        if (mode.includes('n')) { const s = snapDelta([tp], ty, thr); if (s) { tp = s.at; gy = s.at; } }
-        if (mode.includes('s')) { const s = snapDelta([b], ty, thr); if (s) { b = s.at; gy = s.at; } }
-      }
-      l = clamp(l, 0, start.x + start.w - MIN_SIZE);
-      tp = clamp(tp, 0, start.y + start.h - MIN_SIZE);
-      r = clamp(r, start.x + MIN_SIZE, t.w);
-      b = clamp(b, start.y + MIN_SIZE, t.h);
-      if (!mode.includes('w')) l = start.x;
-      if (!mode.includes('n')) tp = start.y;
-      x = l; y = tp; w = r - l; h = b - tp;
+    let l = start.x, r = start.x + start.w, tp = start.y, b = start.y + start.h;
+    if (mode.includes('w')) l += dx;
+    if (mode.includes('e')) r += dx;
+    if (mode.includes('n')) tp += dy;
+    if (mode.includes('s')) b += dy;
+    if (snapOn) {
+      if (mode.includes('w')) { const s = snapDelta([l], tx, thr); if (s) { l = s.at; gx = s.at; } }
+      if (mode.includes('e')) { const s = snapDelta([r], tx, thr); if (s) { r = s.at; gx = s.at; } }
+      if (mode.includes('n')) { const s = snapDelta([tp], ty, thr); if (s) { tp = s.at; gy = s.at; } }
+      if (mode.includes('s')) { const s = snapDelta([b], ty, thr); if (s) { b = s.at; gy = s.at; } }
     }
-    Object.assign(el, { x, y, w, h });
+    l = mode.includes('w') ? clamp(l, 0, start.x + start.w - MIN_SIZE) : start.x;
+    tp = mode.includes('n') ? clamp(tp, 0, start.y + start.h - MIN_SIZE) : start.y;
+    r = clamp(r, start.x + MIN_SIZE, t.w);
+    b = clamp(b, start.y + MIN_SIZE, t.h);
+    Object.assign(el, { x: l, y: tp, w: r - l, h: b - tp });
     placeNode(node, el);
     placeNode(selBox, el);
-    if (mode !== 'move') fitAll(labelEl);
+    fitAll(labelEl);
     showGuides(gx, gy);
     syncProps();
-  };
-  const onUp = () => {
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
-    window.removeEventListener('pointercancel', onUp);
+  }, () => {
     showGuides(null, null);
     if (moved) changed();
-  };
-  window.addEventListener('pointermove', onMove);
-  window.addEventListener('pointerup', onUp);
-  window.addEventListener('pointercancel', onUp);
+  });
+}
+
+// Rubber-band selection started on an empty part of the label.
+function startMarquee(e, base) {
+  e.preventDefault();
+  document.activeElement?.blur?.();
+  const rect = labelEl.getBoundingClientRect();
+  const u = currentU();
+  const x0 = (e.clientX - rect.left) / u, y0 = (e.clientY - rect.top) / u;
+  const box = document.createElement('div');
+  box.className = 'marquee';
+  let shown = false;
+  trackPointer(ev => {
+    const x1 = (ev.clientX - rect.left) / u, y1 = (ev.clientY - rect.top) / u;
+    const m = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+    if (!shown && Math.max(m.w, m.h) * u < 3) return;
+    if (!shown) { overlay.append(box); shown = true; }
+    placeNode(box, m);
+    const hits = state.design.elements
+      .filter(o => o.x < m.x + m.w && o.x + o.w > m.x && o.y < m.y + m.h && o.y + o.h > m.y)
+      .flatMap(groupOf);
+    setSelection([...base, ...hits.map(o => o.id)]);
+  }, () => box.remove());
 }
 
 labelEl.addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
+  const additive = e.shiftKey || e.ctrlKey || e.metaKey;
   const node = e.target.closest('.el');
-  if (!node) { select(null); return; }
+  if (!node) {
+    if (!additive) setSelection([]);
+    startMarquee(e, additive ? [...state.sel] : []);
+    return;
+  }
   const el = state.design.elements.find(x => x.id === node.dataset.id);
-  select(el.id);
-  startDrag(e, el, 'move');
+  const ids = groupOf(el).map(o => o.id);
+  const allIn = ids.every(id => state.sel.includes(id));
+  if (additive) { // Ctrl/Cmd/Shift+click adds or removes the box (with its group)
+    e.preventDefault();
+    setSelection(allIn ? state.sel.filter(id => !ids.includes(id)) : [...state.sel, ...ids]);
+    return;
+  }
+  if (!state.sel.includes(el.id)) { setSelection(ids); startMove(e); return; }
+  // A plain click on something already selected narrows the selection:
+  // from several boxes to this one's group, and from a group to this one box.
+  const wholeGroupOnly = allIn && state.sel.length === ids.length;
+  startMove(e, () => { if (state.sel.length > 1) setSelection(wholeGroupOnly ? [el.id] : ids); });
 });
 overlay.addEventListener('pointerdown', e => {
   const h = e.target.closest('.h');
   const el = selected();
-  if (h && el && e.button === 0) startDrag(e, el, h.dataset.h);
+  if (h && el && e.button === 0) startResize(e, el, h.dataset.h);
 });
 stage.addEventListener('pointerdown', e => {
-  if (e.target === stage || e.target.id === 'labelWrap') select(null);
+  if (e.target === stage || e.target.id === 'labelWrap') setSelection([]);
 });
 labelEl.addEventListener('dblclick', e => {
   const node = e.target.closest('.el');
@@ -444,7 +543,7 @@ function defaultFontSize() {
 
 function addElement(el) {
   state.design.elements.push(el);
-  state.sel = el.id;
+  state.sel = [el.id];
   changed();
 }
 
@@ -693,12 +792,14 @@ const FIELDS = [
   ['pH', el => toUnit(el.h), (el, v) => { el.h = clamp(fromUnit(v), MIN_SIZE, getTpl().h - el.y); }],
 ];
 
-for (const [id, , set] of FIELDS) {
+const SINGLE_ONLY = ['pContent', 'pX', 'pY', 'pW', 'pH', 'pImgSource', 'pImgColumn'];
+for (const [id, get, set] of FIELDS) {
   const input = $('#' + id);
   const handler = () => {
-    const el = selected();
-    if (!el) return;
-    set(el, input.type === 'checkbox' ? input.checked : input.value);
+    // Content and geometry edit one box; style settings apply to every selected box that has them.
+    const targets = SINGLE_ONLY.includes(id) ? [selected()].filter(Boolean) : selection().filter(el => get(el) !== undefined);
+    if (!targets.length) return;
+    for (const el of targets) set(el, input.type === 'checkbox' ? input.checked : input.value);
     changed({ history: 'debounce' }); // typing coalesces into one undo step
   };
   input.addEventListener('input', handler);
@@ -706,12 +807,27 @@ for (const [id, , set] of FIELDS) {
 }
 
 function syncProps(force = false) {
-  const el = selected();
+  const els = selection();
+  const el = els[0];
+  const single = els.length === 1;
   $('#propsEmpty').hidden = !!el;
   $('#propsEl').hidden = !el;
   if (!el) return;
-  $('#secText').hidden = el.type !== 'text';
-  $('#secImage').hidden = el.type !== 'image';
+  const allText = els.every(e => e.type === 'text');
+  const allImage = els.every(e => e.type === 'image');
+  const grouped = els.some(e => e.group);
+  const oneGroup = !single && !!el.group && els.every(e => e.group === el.group) && groupOf(el).length === els.length;
+  $('#multiInfo').hidden = single;
+  $('#multiCount').textContent = oneGroup ? `Group of ${els.length} boxes` : `${els.length} boxes selected`;
+  $('#btnGroup').hidden = single || oneGroup;
+  $('#btnUngroup').hidden = !grouped;
+  $('#groupRow').hidden = single && !grouped;
+  $('#groupHint').hidden = !(single && grouped);
+  $('#secText').hidden = !allText;
+  $('#secContent').hidden = !single;
+  $('#secImage').hidden = !allImage;
+  $('#secImageSource').hidden = !single;
+  $('#secPos').hidden = !single;
   $('#posUnit').textContent = `(${getTpl().unit})`;
   for (const id of ['pX', 'pY', 'pW', 'pH']) $('#' + id).step = getTpl().unit === 'mm' ? 0.5 : 0.01;
   for (const [id, get] of FIELDS) {
@@ -726,7 +842,7 @@ function syncProps(force = false) {
     const [k, v] = b.dataset.set.split(':');
     b.classList.toggle('active', el[k] === v);
   }
-  if (el.type === 'image') {
+  if (single && el.type === 'image') {
     $('#imgStatic').hidden = el.source !== 'static';
     $('#imgColumn').hidden = el.source !== 'column';
     const n = new Set(state.imageLib.values()).size;
@@ -735,20 +851,32 @@ function syncProps(force = false) {
 }
 
 $('#propsEl').addEventListener('click', e => {
-  const el = selected();
+  const els = selection();
   const b = e.target.closest('button');
-  if (!el || !b) return;
-  const t = getTpl();
-  if (b.dataset.toggle) el[b.dataset.toggle] = !el[b.dataset.toggle];
-  else if (b.dataset.set) { const [k, v] = b.dataset.set.split(':'); el[k] = v; }
-  else if (b.dataset.place) {
+  if (!els.length || !b) return;
+  if (b.dataset.toggle) {
+    const k = b.dataset.toggle, on = !els[0][k];
+    for (const el of els) if (el.type === 'text') el[k] = on;
+  } else if (b.dataset.set) {
+    const [k, v] = b.dataset.set.split(':');
+    for (const el of els) if (el.type === 'text') el[k] = v;
+  } else if (b.dataset.place) {
+    // One box or one group aligns to the label; several align to each other.
+    const t = getTpl();
+    const units = selectionUnits();
+    const ref = units.length === 1 ? { x: 0, y: 0, w: t.w, h: t.h } : bounds(els);
     const p = b.dataset.place;
-    if (p === 'left') el.x = 0;
-    if (p === 'hcenter') el.x = (t.w - el.w) / 2;
-    if (p === 'right') el.x = t.w - el.w;
-    if (p === 'top') el.y = 0;
-    if (p === 'vmiddle') el.y = (t.h - el.h) / 2;
-    if (p === 'bottom') el.y = t.h - el.h;
+    for (const unit of units) {
+      const bb = bounds(unit);
+      let dx = 0, dy = 0;
+      if (p === 'left') dx = ref.x - bb.x;
+      if (p === 'hcenter') dx = ref.x + (ref.w - bb.w) / 2 - bb.x;
+      if (p === 'right') dx = ref.x + ref.w - bb.w - bb.x;
+      if (p === 'top') dy = ref.y - bb.y;
+      if (p === 'vmiddle') dy = ref.y + (ref.h - bb.h) / 2 - bb.y;
+      if (p === 'bottom') dy = ref.y + ref.h - bb.h - bb.y;
+      for (const el of unit) { el.x += dx; el.y += dy; }
+    }
   } else return;
   changed();
 });
@@ -818,27 +946,61 @@ $('#btnImgLib').onclick = async () => {
 
 function removeSelected() {
   const d = state.design;
-  d.elements = d.elements.filter(e => e.id !== state.sel);
-  state.sel = null;
+  d.elements = d.elements.filter(e => !state.sel.includes(e.id));
+  state.sel = [];
   changed();
 }
 function duplicateSelected() {
-  const el = selected();
-  if (!el) return;
+  const els = selection();
+  if (!els.length) return;
   const t = getTpl();
-  const copy = { ...structuredClone(el), id: uid() };
-  copy.x = clamp(el.x + 6, 0, Math.max(0, t.w - el.w));
-  copy.y = clamp(el.y + 6, 0, Math.max(0, t.h - el.h));
-  addElement(copy);
-}
-function reorder(toFront) {
-  const el = selected();
-  if (!el) return;
-  const els = state.design.elements.filter(e => e !== el);
-  toFront ? els.push(el) : els.unshift(el);
-  state.design.elements = els;
+  const bb = bounds(els);
+  const dx = clamp(bb.x + 6, 0, Math.max(0, t.w - bb.w)) - bb.x;
+  const dy = clamp(bb.y + 6, 0, Math.max(0, t.h - bb.h)) - bb.y;
+  const groups = new Map();
+  const copies = els.map(el => {
+    const copy = { ...structuredClone(el), id: uid(), x: el.x + dx, y: el.y + dy };
+    if (el.group) {
+      if (!groups.has(el.group)) groups.set(el.group, uid());
+      copy.group = groups.get(el.group);
+    }
+    return copy;
+  });
+  state.design.elements.push(...copies);
+  state.sel = copies.map(c => c.id);
   changed();
 }
+function reorder(toFront) {
+  const els = selection();
+  if (!els.length) return;
+  const rest = state.design.elements.filter(e => !els.includes(e));
+  state.design.elements = toFront ? [...rest, ...els] : [...els, ...rest];
+  changed();
+}
+function groupSelected() {
+  const els = selection();
+  if (els.length < 2) return;
+  const g = uid();
+  for (const el of els) el.group = g;
+  changed();
+}
+function ungroupSelected() {
+  const els = selection().filter(el => el.group);
+  if (!els.length) return;
+  for (const el of els) delete el.group;
+  changed();
+}
+function nudgeSelected(dx, dy) {
+  const els = selection();
+  const t = getTpl();
+  const bb = bounds(els);
+  const mx = clamp(bb.x + dx, 0, Math.max(0, t.w - bb.w)) - bb.x;
+  const my = clamp(bb.y + dy, 0, Math.max(0, t.h - bb.h)) - bb.y;
+  for (const el of els) { el.x += mx; el.y += my; }
+  changed({ history: 'debounce' });
+}
+$('#btnGroup').onclick = groupSelected;
+$('#btnUngroup').onclick = ungroupSelected;
 $('#btnDel').onclick = removeSelected;
 $('#btnDup').onclick = duplicateSelected;
 $('#btnFront').onclick = () => reorder(true);
@@ -1086,7 +1248,7 @@ $('#btnNew').onclick = () => {
   if (state.design.elements.length && !confirm('Start a new blank design? The current layout will be cleared (you can undo).')) return;
   const { templateId, custom, assets, fonts } = state.design;
   state.design = { ...newDesign(), templateId, custom, assets, fonts };
-  state.sel = null;
+  state.sel = [];
   refreshAll();
 };
 
@@ -1097,20 +1259,20 @@ window.addEventListener('keydown', e => {
   if (e.target.closest?.('input, textarea, select, dialog')) return;
   if (mod && key === 'z') { e.preventDefault(); stepHistory(e.shiftKey ? 1 : -1); return; }
   if (mod && key === 'y') { e.preventDefault(); stepHistory(1); return; }
+  if (state.view !== 'design') return;
+  if (mod && key === 'a') { e.preventDefault(); setSelection(state.design.elements.map(o => o.id)); return; }
+  if (!state.sel.length) return;
   const el = selected();
-  if (!el || state.view !== 'design') return;
   if (mod && key === 'd') { e.preventDefault(); duplicateSelected(); return; }
+  if (mod && key === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelected() : groupSelected(); return; }
   if (key === 'delete' || key === 'backspace') { e.preventDefault(); removeSelected(); return; }
-  if (key === 'escape') { select(null); return; }
-  if (key === 'enter' && el.type === 'text') { e.preventDefault(); startInlineEdit(el); return; }
+  if (key === 'escape') { setSelection([]); return; }
+  if (key === 'enter' && el?.type === 'text') { e.preventDefault(); startInlineEdit(el); return; }
   const arrows = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] };
   if (arrows[key]) {
     e.preventDefault();
-    const t = getTpl();
     const step = e.shiftKey ? 5 : 0.5;
-    el.x = clamp(el.x + arrows[key][0] * step, 0, Math.max(0, t.w - el.w));
-    el.y = clamp(el.y + arrows[key][1] * step, 0, Math.max(0, t.h - el.h));
-    changed();
+    nudgeSelected(arrows[key][0] * step, arrows[key][1] * step);
   }
 });
 
