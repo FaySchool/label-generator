@@ -424,9 +424,15 @@ function startResize(e, el, mode) {
   document.activeElement?.blur?.();
   const t = getTpl();
   const u = currentU();
-  const start = { x: el.x, y: el.y, w: el.w, h: el.h };
-  const rotated = !!el.rot;
-  const a = ((el.rot || 0) * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+  const rot = el.rot || 0;
+  // Quarter turns keep the box's edges parallel to the label, so they resize like an upright
+  // box (with snapping and label limits) on their on-screen outline. Other angles resize freely.
+  const quarter = rot % 90 === 0 ? ((rot / 90) % 4 + 4) % 4 : null;
+  const upright = quarter !== null;
+  const a = (rot * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+  // For quarter turns, work on the outline as seen on the label: map each handle to the edge it sits on.
+  const start = upright ? { ...aabb(el) } : { x: el.x, y: el.y, w: el.w, h: el.h };
+  const edges = upright ? [...mode].map(c => 'nesw'[('nesw'.indexOf(c) + quarter) % 4]).join('') : mode;
   const { tx, ty } = snapTargets([el]);
   const node = labelEl.querySelector(`[data-id="${el.id}"]`);
   const selBox = $('.sel', overlay);
@@ -436,32 +442,38 @@ function startResize(e, el, mode) {
     const px = (ev.clientX - e.clientX) / u, py = (ev.clientY - e.clientY) / u;
     if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return;
     moved = true;
-    // Pointer movement expressed along the box's own axes.
-    const dx = px * cos + py * sin, dy = -px * sin + py * cos;
-    const snapOn = state.snap && !ev.altKey && !rotated;
+    // Pointer movement along the axes being resized (the box's own axes when at an odd angle).
+    const dx = upright ? px : px * cos + py * sin;
+    const dy = upright ? py : -px * sin + py * cos;
+    const snapOn = state.snap && !ev.altKey && upright;
     const thr = 5 / u;
     let gx = null, gy = null;
     let l = start.x, r = start.x + start.w, tp = start.y, b = start.y + start.h;
-    if (mode.includes('w')) l += dx;
-    if (mode.includes('e')) r += dx;
-    if (mode.includes('n')) tp += dy;
-    if (mode.includes('s')) b += dy;
+    if (edges.includes('w')) l += dx;
+    if (edges.includes('e')) r += dx;
+    if (edges.includes('n')) tp += dy;
+    if (edges.includes('s')) b += dy;
     if (snapOn) {
-      if (mode.includes('w')) { const s = snapDelta([l], tx, thr); if (s) { l = s.at; gx = s.at; } }
-      if (mode.includes('e')) { const s = snapDelta([r], tx, thr); if (s) { r = s.at; gx = s.at; } }
-      if (mode.includes('n')) { const s = snapDelta([tp], ty, thr); if (s) { tp = s.at; gy = s.at; } }
-      if (mode.includes('s')) { const s = snapDelta([b], ty, thr); if (s) { b = s.at; gy = s.at; } }
+      if (edges.includes('w')) { const s = snapDelta([l], tx, thr); if (s) { l = s.at; gx = s.at; } }
+      if (edges.includes('e')) { const s = snapDelta([r], tx, thr); if (s) { r = s.at; gx = s.at; } }
+      if (edges.includes('n')) { const s = snapDelta([tp], ty, thr); if (s) { tp = s.at; gy = s.at; } }
+      if (edges.includes('s')) { const s = snapDelta([b], ty, thr); if (s) { b = s.at; gy = s.at; } }
     }
-    const lim = rotated ? { l: -Infinity, t: -Infinity, r: Infinity, b: Infinity } : { l: 0, t: 0, r: t.w, b: t.h };
-    l = mode.includes('w') ? clamp(l, lim.l, start.x + start.w - MIN_SIZE) : start.x;
-    tp = mode.includes('n') ? clamp(tp, lim.t, start.y + start.h - MIN_SIZE) : start.y;
-    r = clamp(r, start.x + MIN_SIZE, lim.r);
-    b = clamp(b, start.y + MIN_SIZE, lim.b);
-    const w = r - l, h = b - tp;
-    // The box rotates about its centre, so shift the new centre to keep the opposite edge still.
-    const mx = (l + r) / 2 - (start.x + start.w / 2), my = (tp + b) / 2 - (start.y + start.h / 2);
-    const cx = start.x + start.w / 2 + mx * cos - my * sin;
-    const cy = start.y + start.h / 2 + mx * sin + my * cos;
+    const lim = upright ? { l: 0, t: 0, r: t.w, b: t.h } : { l: -Infinity, t: -Infinity, r: Infinity, b: Infinity };
+    l = edges.includes('w') ? clamp(l, Math.min(lim.l, start.x), start.x + start.w - MIN_SIZE) : start.x;
+    tp = edges.includes('n') ? clamp(tp, Math.min(lim.t, start.y), start.y + start.h - MIN_SIZE) : start.y;
+    r = edges.includes('e') ? clamp(r, start.x + MIN_SIZE, Math.max(lim.r, start.x + start.w)) : start.x + start.w;
+    b = edges.includes('s') ? clamp(b, start.y + MIN_SIZE, Math.max(lim.b, start.y + start.h)) : start.y + start.h;
+    let w = r - l, h = b - tp, cx, cy;
+    if (upright) {
+      cx = (l + r) / 2; cy = (tp + b) / 2;
+      if (quarter % 2) [w, h] = [h, w]; // on-screen width is the box's own height
+    } else {
+      // The box rotates about its centre, so shift the new centre to keep the opposite edge still.
+      const mx = (l + r) / 2 - (start.x + start.w / 2), my = (tp + b) / 2 - (start.y + start.h / 2);
+      cx = start.x + start.w / 2 + mx * cos - my * sin;
+      cy = start.y + start.h / 2 + mx * sin + my * cos;
+    }
     Object.assign(el, { x: cx - w / 2, y: cy - h / 2, w, h });
     placeNode(node, el);
     placeNode(selBox, el);
@@ -470,7 +482,7 @@ function startResize(e, el, mode) {
     syncProps();
   }, () => {
     showGuides(null, null);
-    if (moved) { if (rotated) keepOnLabel(el); changed(); }
+    if (moved) { if (!upright) keepOnLabel(el); changed(); }
   });
 }
 
