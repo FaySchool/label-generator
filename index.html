@@ -111,6 +111,7 @@
           <li>Drag a box to move it; drag its handles to resize.</li>
           <li>Double-click a text box to edit it in place.</li>
           <li>Select several boxes with Ctrl/Cmd/Shift+click, or drag a rectangle across the label. Ctrl/Cmd+G groups them so they move together.</li>
+          <li>Ctrl/Cmd+C, X and V copy, cut and paste boxes; Ctrl/Cmd+B, I and U make the selected text bold, italic or underlined.</li>
           <li>Arrow keys nudge the selected box (hold Shift for bigger steps).</li>
           <li>Type <code>{{Column}}</code> to mix merge fields with plain text, e.g. <code>{{City}}, {{State}} {{Zip}}</code>.</li>
           <li>Conditional text: <code>{{#Nickname}} ({{Nickname}}){{/Nickname}}</code> appears only when Nickname has a value; use <code>{{^Nickname}}…{{/Nickname}}</code> for text shown only when it is empty.</li>
@@ -144,9 +145,9 @@
           <div class="row">
             <label class="inline">Size <input type="number" id="pSize" min="2" max="400" step="0.5"> pt</label>
             <div class="seg">
-              <button data-toggle="bold" title="Bold"><b>B</b></button>
-              <button data-toggle="italic" title="Italic"><i>I</i></button>
-              <button data-toggle="underline" title="Underline"><u>U</u></button>
+              <button data-toggle="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+              <button data-toggle="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+              <button data-toggle="underline" title="Underline (Ctrl+U)"><u>U</u></button>
             </div>
             <input type="color" id="pColor" title="Text colour">
           </div>
@@ -220,6 +221,10 @@
             <button data-place="vmiddle">Middle</button>
             <button data-place="bottom">Bottom</button>
           </div>
+        </div>
+        <div class="row" id="distRow" title="Space three or more boxes evenly between the outermost two">
+          <button data-distribute="h" class="grow">Distribute ↔</button>
+          <button data-distribute="v" class="grow">Distribute ↕</button>
         </div>
         <div class="row">
           <button id="btnFront" class="grow">Bring to front</button>

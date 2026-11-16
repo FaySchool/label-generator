@@ -231,6 +231,9 @@ function updateUndoButtons() {
 // Call after any edit to the design.
 function changed({ history = true } = {}) {
   renderEditor();
+  const editing = $('.inline-edit', overlay);
+  const editingEl = editing && state.design.elements.find(e => e.id === editing.dataset.id);
+  if (editingEl) { placeNode(editing, editingEl); styleInlineEdit(editing, editingEl); }
   syncProps();
   if (state.view === 'sheets') renderSheets();
   scheduleSave();
@@ -501,6 +504,19 @@ labelEl.addEventListener('dblclick', e => {
   else if (el.source === 'static') chooseStaticImage(el);
 });
 
+function styleInlineEdit(ta, el) {
+  Object.assign(ta.style, {
+    fontFamily: fontStack(el.fontFamily),
+    fontSize: U(el.fontSize),
+    fontWeight: el.bold ? '700' : '400',
+    fontStyle: el.italic ? 'italic' : 'normal',
+    textDecoration: el.underline ? 'underline' : 'none',
+    color: el.color,
+    textAlign: el.align,
+    lineHeight: String(el.lineHeight),
+  });
+}
+
 function startInlineEdit(el) {
   $('.inline-edit', overlay)?.remove();
   const ta = document.createElement('textarea');
@@ -508,15 +524,8 @@ function startInlineEdit(el) {
   ta.spellcheck = false;
   ta.value = el.content;
   placeNode(ta, el);
-  Object.assign(ta.style, {
-    fontFamily: fontStack(el.fontFamily),
-    fontSize: U(el.fontSize),
-    fontWeight: el.bold ? '700' : '400',
-    fontStyle: el.italic ? 'italic' : 'normal',
-    color: el.color,
-    textAlign: el.align,
-    lineHeight: String(el.lineHeight),
-  });
+  ta.dataset.id = el.id;
+  styleInlineEdit(ta, el);
   overlay.append(ta);
   ta.focus();
   ta.select();
@@ -823,6 +832,9 @@ function syncProps(force = false) {
   $('#btnUngroup').hidden = !grouped;
   $('#groupRow').hidden = single && !grouped;
   $('#groupHint').hidden = !(single && grouped);
+  const unitCount = selectionUnits().length;
+  $('#distRow').hidden = unitCount < 2;
+  for (const btn of $$('#distRow button')) btn.disabled = unitCount < 3;
   $('#secText').hidden = !allText;
   $('#secContent').hidden = !single;
   $('#secImage').hidden = !allImage;
@@ -877,9 +889,29 @@ $('#propsEl').addEventListener('click', e => {
       if (p === 'bottom') dy = ref.y + ref.h - bb.h - bb.y;
       for (const el of unit) { el.x += dx; el.y += dy; }
     }
+  } else if (b.dataset.distribute) {
+    distributeSelected(b.dataset.distribute);
+    return;
   } else return;
   changed();
 });
+
+// Spaces the selected boxes/groups evenly between the two outermost ones.
+function distributeSelected(axis) {
+  const [pos, size] = axis === 'h' ? ['x', 'w'] : ['y', 'h'];
+  const units = selectionUnits().map(els => ({ els, bb: bounds(els) })).sort((a, b) => a.bb[pos] - b.bb[pos] || a.bb[size] - b.bb[size]);
+  if (units.length < 3) return;
+  const start = units[0].bb[pos];
+  const end = Math.max(...units.map(u => u.bb[pos] + u.bb[size]));
+  const gap = (end - start - units.reduce((n, u) => n + u.bb[size], 0)) / (units.length - 1);
+  let at = start;
+  for (const u of units) {
+    const d = at - u.bb[pos];
+    for (const el of u.els) el[pos] += d;
+    at += u.bb[size] + gap;
+  }
+  changed();
+}
 
 // Replaces the textarea selection with before + selection + after and leaves the caret inside.
 function insertIntoContent(before, after = '') {
@@ -950,16 +982,19 @@ function removeSelected() {
   state.sel = [];
   changed();
 }
-function duplicateSelected() {
-  const els = selection();
+// Adds copies of `els` (fresh ids, groups kept together) offset by `shift` points and selects them.
+function addCopies(els, shift) {
   if (!els.length) return;
   const t = getTpl();
-  const bb = bounds(els);
-  const dx = clamp(bb.x + 6, 0, Math.max(0, t.w - bb.w)) - bb.x;
-  const dy = clamp(bb.y + 6, 0, Math.max(0, t.h - bb.h)) - bb.y;
+  const fitted = els.map(el => ({ ...el, w: Math.min(el.w, t.w), h: Math.min(el.h, t.h) }));
+  const bb = bounds(fitted);
+  const dx = clamp(bb.x + shift, 0, Math.max(0, t.w - bb.w)) - bb.x;
+  const dy = clamp(bb.y + shift, 0, Math.max(0, t.h - bb.h)) - bb.y;
   const groups = new Map();
-  const copies = els.map(el => {
-    const copy = { ...structuredClone(el), id: uid(), x: el.x + dx, y: el.y + dy };
+  const copies = fitted.map(el => {
+    const copy = { ...structuredClone(el), id: uid() };
+    copy.x = clamp(el.x + dx, 0, t.w - copy.w);
+    copy.y = clamp(el.y + dy, 0, t.h - copy.h);
     if (el.group) {
       if (!groups.has(el.group)) groups.set(el.group, uid());
       copy.group = groups.get(el.group);
@@ -969,6 +1004,39 @@ function duplicateSelected() {
   state.design.elements.push(...copies);
   state.sel = copies.map(c => c.id);
   changed();
+}
+function duplicateSelected() {
+  addCopies(selection(), 6);
+}
+
+// Internal clipboard for boxes; each paste lands a little further from the original.
+const clipboard = { els: [], pastes: 0 };
+function copySelected() {
+  const els = selection();
+  if (!els.length) return false;
+  clipboard.els = structuredClone(els);
+  clipboard.pastes = 0;
+  return true;
+}
+function cutSelected() {
+  if (!copySelected()) return;
+  clipboard.pastes = -1; // first paste after a cut goes back to the original spot
+  removeSelected();
+}
+function pasteClipboard() {
+  if (!clipboard.els.length) return;
+  clipboard.pastes++;
+  // Skip images whose data is no longer in this design (e.g. after opening another file).
+  const els = clipboard.els.filter(el => el.type !== 'image' || el.source !== 'static' || !el.assetId || state.design.assets[el.assetId]);
+  addCopies(els, 6 * clipboard.pastes);
+}
+function toggleTextStyle(key) {
+  const texts = selection().filter(el => el.type === 'text');
+  if (!texts.length) return false;
+  const on = !texts[0][key];
+  for (const el of texts) el[key] = on;
+  changed();
+  return true;
 }
 function reorder(toFront) {
   const els = selection();
@@ -1256,7 +1324,16 @@ window.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
   const key = e.key.toLowerCase();
   if (mod && key === 'p') { e.preventDefault(); printLabels(); return; }
-  if (e.target.closest?.('input, textarea, select, dialog')) return;
+  const inField = e.target.closest?.('input, textarea, select, dialog');
+  // Bold / italic / underline also work while typing in a text box's content.
+  const styleKey = { b: 'bold', i: 'italic', u: 'underline' }[key];
+  if (mod && styleKey && !e.shiftKey && !e.altKey && state.view === 'design'
+      && (!inField || e.target.matches('.inline-edit, #pContent'))) {
+    if (toggleTextStyle(styleKey)) e.preventDefault();
+    return;
+  }
+  if (inField) return;
+  if (mod && key === 'v' && state.view === 'design') { if (clipboard.els.length) { e.preventDefault(); pasteClipboard(); } return; }
   if (mod && key === 'z') { e.preventDefault(); stepHistory(e.shiftKey ? 1 : -1); return; }
   if (mod && key === 'y') { e.preventDefault(); stepHistory(1); return; }
   if (state.view !== 'design') return;
@@ -1264,6 +1341,8 @@ window.addEventListener('keydown', e => {
   if (!state.sel.length) return;
   const el = selected();
   if (mod && key === 'd') { e.preventDefault(); duplicateSelected(); return; }
+  if (mod && key === 'c') { e.preventDefault(); copySelected(); return; }
+  if (mod && key === 'x') { e.preventDefault(); cutSelected(); return; }
   if (mod && key === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelected() : groupSelected(); return; }
   if (key === 'delete' || key === 'backspace') { e.preventDefault(); removeSelected(); return; }
   if (key === 'escape') { setSelection([]); return; }
