@@ -30,7 +30,8 @@ function newDesign() {
 
 const state = {
   design: newDesign(),
-  data: { raw: '', fileName: '', hasHeader: true, headers: [], records: [] },
+  // allowRemote: the user agreed to load web image URLs found in this data (asked once per file).
+  data: { raw: '', fileName: '', hasHeader: true, allowRemote: false, headers: [], records: [] },
   imageLib: new Map(), // lower-cased file name -> object URL
   sel: [], // ids of the selected elements
   record: 0,
@@ -103,7 +104,12 @@ function resolveImage(el, row) {
   if (el.source === 'static') return state.design.assets[el.assetId] || null;
   const v = String(row?.[el.column] ?? '').trim();
   if (!v) return null;
-  if (/^(https?:\/\/|data:image\/|blob:)/i.test(v)) return v;
+  if (/^https?:\/\//i.test(v)) {
+    // A web address lets that site see who prints the labels and when, so they load only once
+    // the user agrees. Plain http is upgraded: the page only allows https images.
+    return state.data.allowRemote ? v.replace(/^http:/i, 'https:') : null;
+  }
+  if (/^(data:image\/|blob:)/i.test(v)) return v;
   const base = v.split(/[\\/]/).pop().toLowerCase();
   return state.imageLib.get(base) || state.imageLib.get(base.replace(/\.[a-z0-9]+$/, '')) || null;
 }
@@ -151,10 +157,10 @@ function scheduleSave() {
 }
 function saveData() {
   try {
-    const { raw, fileName, hasHeader } = state.data;
+    const { raw, fileName, hasHeader, allowRemote } = state.data;
     // sessionStorage, not localStorage: the rows (often names and addresses) survive a reload
     // but are cleared when the tab closes, so they don't linger on shared computers.
-    if (raw.length < 1_500_000) sessionStorage.setItem(KEY_DATA, JSON.stringify({ raw, fileName, hasHeader }));
+    if (raw.length < 1_500_000) sessionStorage.setItem(KEY_DATA, JSON.stringify({ raw, fileName, hasHeader, allowRemote }));
     else sessionStorage.removeItem(KEY_DATA);
   } catch { /* ignore */ }
 }
@@ -260,6 +266,7 @@ function changed({ history = true } = {}) {
   const editingEl = editing && state.design.elements.find(e => e.id === editing.dataset.id);
   if (editingEl) { placeNode(editing, editingEl); styleInlineEdit(editing, editingEl); }
   syncProps();
+  syncRemoteNotice();
   if (state.view === 'sheets') renderSheets();
   scheduleSave();
   if (history === 'debounce') scheduleHistory();
@@ -744,12 +751,33 @@ function reparse() {
 }
 
 function loadCSVText(text, fileName) {
-  Object.assign(state.data, { raw: text, fileName });
+  Object.assign(state.data, { raw: text, fileName, allowRemote: false });
   state.record = 0;
   reparse();
   saveData();
   syncColumns();
   changed({ history: false });
+}
+
+// Distinct web image addresses in the data, counting only columns used by image boxes.
+function remoteImageCount() {
+  const cols = new Set(state.design.elements.filter(e => e.type === 'image' && e.source === 'column').map(e => e.column));
+  const urls = new Set();
+  for (const r of state.data.records) for (const c of cols) {
+    const v = String(r[c] ?? '').trim();
+    if (/^https?:\/\//i.test(v)) urls.add(v);
+  }
+  return urls.size;
+}
+
+// Offers to load web images once an image box uses a column that holds web addresses.
+function syncRemoteNotice() {
+  const n = state.data.allowRemote ? 0 : remoteImageCount();
+  $('#remoteImages').hidden = !n;
+  if (n) {
+    $('#remoteImagesText').textContent = `This data links to ${n} image${n === 1 ? '' : 's'} on other ` +
+      'websites. They are not loaded yet: loading them lets those sites see your IP address and when you use these labels.';
+  }
 }
 
 function syncColumns() {
@@ -1492,6 +1520,28 @@ $('#btnOpen').onclick = async () => {
   const [file] = await pickFile($('#fileDesign'));
   if (file) openDesignText(await readFile(file, 'text'));
 };
+$('#btnLoadRemote').onclick = () => {
+  state.data.allowRemote = true;
+  saveData();
+  changed({ history: false });
+};
+
+// Removes everything this page keeps in the browser, for shared computers.
+$('#btnForget').onclick = () => {
+  if (!confirm('Remove the design, data and images from this browser? Save the design to a file first if you want to keep it. This cannot be undone.')) return;
+  clearTimeout(saveTimer);
+  try { localStorage.removeItem(KEY_DESIGN); sessionStorage.removeItem(KEY_DATA); } catch { /* storage unavailable */ }
+  for (const url of new Set(state.imageLib.values())) URL.revokeObjectURL(url);
+  state.imageLib.clear();
+  Object.assign(state.data, { raw: '', fileName: '', hasHeader: true, allowRemote: false });
+  reparse();
+  state.design = newDesign();
+  state.sel = [];
+  resetHistory();
+  refreshAll({ history: false });
+  clearTimeout(saveTimer); // nothing to save until the next edit
+};
+
 $('#btnNew').onclick = () => {
   if (state.design.elements.length && !confirm('Start a new blank design? The current layout will be cleared (you can undo).')) return;
   const { templateId, custom, assets, fonts } = state.design;
