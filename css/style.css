@@ -59,6 +59,8 @@ code { background: #f0f2f0; padding: 0 3px; border-radius: 3px; font-size: 11.5p
 .sep { width: 1px; align-self: stretch; background: var(--line); margin: 4px 2px; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
+.notice { border: 1px solid #e3c98a; background: #fdf6e3; border-radius: var(--radius); padding: 8px; margin: 6px 0; }
+.notice p { margin: 0 0 6px; }
 .check { display: flex; gap: 6px; align-items: center; margin: 6px 0; cursor: pointer; }
 .inline { display: inline-flex; gap: 6px; align-items: center; margin: 4px 0; }
 

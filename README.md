@@ -37,8 +37,11 @@ browser – your data is never uploaded – and there is no build step.
 
 - The design autosaves in the browser. The loaded CSV is kept only for the current tab: it survives
   a reload but is cleared when the tab is closed, so names and addresses don't stay on shared computers.
+  **Clear all…** removes the saved design, data and images from the browser straight away.
 - The only requests to other sites are the ones you ask for: Google Fonts (fonts.googleapis.com and
-  fonts.gstatic.com) when you pick a Google font, and image URLs from a CSV column.
+  fonts.gstatic.com) when you pick a Google font, and image URLs from a CSV column. Web image URLs
+  are loaded only after you click **Load web images** for that file, since each one tells its site
+  your IP address. `http://` image URLs are loaded over `https://`.
 - Images and fonts inside a design file must be embedded `data:` URLs. Anything else, such as a link
   to a remote server, is dropped when the design is opened.
 - A Content-Security-Policy in `index.html` makes the browser enforce this: scripts only from this
