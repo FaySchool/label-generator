@@ -3,7 +3,7 @@ import { parseCSV } from './csv.js';
 import { buildElementNode, placeNode, fitAll, U, toggleRangeStyle } from './render.js';
 import { BARCODE_FORMATS } from './barcode.js';
 import {
-  SYSTEM_FONTS, GOOGLE_FONTS, fontStack, setFontLoadCallback, registerCustomFont, whenFontsReady,
+  SYSTEM_FONTS, GOOGLE_FONTS, fontStack, setFontLoadCallback, registerCustomFont, whenFontsReady, isSafeDataUrl,
 } from './fonts.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -152,8 +152,10 @@ function scheduleSave() {
 function saveData() {
   try {
     const { raw, fileName, hasHeader } = state.data;
-    if (raw.length < 1_500_000) localStorage.setItem(KEY_DATA, JSON.stringify({ raw, fileName, hasHeader }));
-    else localStorage.removeItem(KEY_DATA);
+    // sessionStorage, not localStorage: the rows (often names and addresses) survive a reload
+    // but are cleared when the tab closes, so they don't linger on shared computers.
+    if (raw.length < 1_500_000) sessionStorage.setItem(KEY_DATA, JSON.stringify({ raw, fileName, hasHeader }));
+    else sessionStorage.removeItem(KEY_DATA);
   } catch { /* ignore */ }
 }
 
@@ -161,7 +163,12 @@ function normalizeDesign(d) {
   const base = newDesign();
   const out = { ...base, ...d, print: { ...base.print, ...(d.print || {}) } };
   out.elements = Array.isArray(d.elements) ? d.elements : [];
-  out.assets = d.assets || {};
+  // Assets must be inline data: URLs. A design file from elsewhere could otherwise point an
+  // image or font at a remote address, which the page would fetch.
+  out.assets = {};
+  if (d.assets && typeof d.assets === 'object') {
+    for (const [id, url] of Object.entries(d.assets)) if (isSafeDataUrl(url)) out.assets[id] = url;
+  }
   out.fonts = Array.isArray(d.fonts) ? d.fonts : [];
   if (out.templateId !== 'custom' && !TEMPLATES.some(t => t.id === out.templateId)) out.templateId = '5160';
   if (out.templateId === 'custom' && !out.custom) out.templateId = '5160';
@@ -1397,9 +1404,22 @@ function renderSheets() {
   $('#sheetInfo').textContent = `${total} sheet${total === 1 ? '' : 's'}` + (n ? ` · ${n} record${n === 1 ? '' : 's'}` : ' · no data loaded');
 }
 
+// The @page rule lives in a constructed stylesheet: the Content-Security-Policy blocks inline <style>.
+let pageSheet = null;
 function setPageStyle() {
   const t = getTpl();
-  $('#pageStyle').textContent = `@page { size: ${+(t.pageW / IN).toFixed(4)}in ${+(t.pageH / IN).toFixed(4)}in; margin: 0; }`;
+  const css = `@page { size: ${+(t.pageW / IN).toFixed(4)}in ${+(t.pageH / IN).toFixed(4)}in; margin: 0; }`;
+  if (!pageSheet) {
+    try {
+      pageSheet = new CSSStyleSheet();
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, pageSheet];
+    } catch {
+      // Browsers without constructable stylesheets (Safari before 16.4): fall back to a <style> element.
+      pageSheet = document.head.appendChild(document.createElement('style'));
+    }
+  }
+  if (pageSheet.replaceSync) pageSheet.replaceSync(css);
+  else pageSheet.textContent = css;
 }
 
 function preparePrint() {
@@ -1535,7 +1555,10 @@ setFontLoadCallback(() => {
     if (saved && Array.isArray(saved.elements)) state.design = normalizeDesign(saved);
   } catch { /* start fresh */ }
   try {
-    const saved = JSON.parse(localStorage.getItem(KEY_DATA) || 'null');
+    localStorage.removeItem(KEY_DATA); // older versions kept the data here permanently
+  } catch { /* storage unavailable */ }
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(KEY_DATA) || 'null');
     if (saved?.raw) { Object.assign(state.data, saved); reparse(); }
   } catch { /* no saved data */ }
   await registerDesignFonts();

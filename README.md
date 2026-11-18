@@ -33,6 +33,17 @@ browser – your data is never uploaded – and there is no build step.
   record, outlines for test prints, and a nudge offset to correct printer misalignment.
 - Undo/redo, autosave in the browser, and save/open designs as a file.
 
+## Privacy and security
+
+- The design autosaves in the browser. The loaded CSV is kept only for the current tab: it survives
+  a reload but is cleared when the tab is closed, so names and addresses don't stay on shared computers.
+- The only requests to other sites are the ones you ask for: Google Fonts (fonts.googleapis.com and
+  fonts.gstatic.com) when you pick a Google font, and image URLs from a CSV column.
+- Images and fonts inside a design file must be embedded `data:` URLs. Anything else, such as a link
+  to a remote server, is dropped when the design is opened.
+- A Content-Security-Policy in `index.html` makes the browser enforce this: scripts only from this
+  site, styles and fonts only from this site and Google Fonts, and no other network connections.
+
 ## Printing
 
 Use the **Print…** button and, in the browser's print dialog, set **Scale: 100% / Actual size**
