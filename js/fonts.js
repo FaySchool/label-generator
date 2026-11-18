@@ -48,8 +48,14 @@ export function ensureFont(name) {
   }));
 }
 
+// A base64 data: URL, as FileReader.readAsDataURL and canvas.toDataURL produce. Nothing else is
+// accepted for embedded images and fonts, so they can never make the page load a remote file.
+const DATA_URL = /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[a-z0-9.+-]+=[a-z0-9.+-]+)*;base64,[a-z0-9+/]*={0,2}$/i;
+export const isSafeDataUrl = (url) => typeof url === 'string' && DATA_URL.test(url);
+
 export async function registerCustomFont(name, dataUrl) {
-  const face = new FontFace(name, `url(${dataUrl})`);
+  if (!isSafeDataUrl(dataUrl)) throw new Error('Not a font file');
+  const face = new FontFace(name, `url("${dataUrl}")`);
   await face.load();
   document.fonts.add(face);
   custom.add(name);
